@@ -5,9 +5,10 @@ import os
 from typing import List
 
 import torch
-from datasets import Dataset, IterableDataset
+from datasets import IterableDataset
+from rathe import AbstractPromptParser, AbstractPromptFormatter
 
-from .prompt_tokenizers import PromptTokenizingStrategy
+from transformers import PreTrainedTokenizerBase
 
 # We want this to be a wrapper for an existing dataset that we have loaded
 # lets use the concept of middlewares to wrap each dataset, for example
@@ -18,31 +19,23 @@ from .prompt_tokenizers import PromptTokenizingStrategy
 LOG = logging.getLogger("axolotl")
 
 
-class TokenizedPromptDataset(Dataset):
-    """
-    Dataset that returns tokenized prompts from a stream of text files.
-        Args:
-            prompt_tokenizer (PromptTokenizingStrategy): The prompt tokenizing method for proccessing the data.
-            dataset (dataset.Dataset): Dataset with text files.
-    """
+def TokenizedPromptDataset(
+    parser: AbstractPromptParser,
+    formatter: AbstractPromptFormatter,
+    tokenizer: PreTrainedTokenizerBase,
+    dataset: IterableDataset,
+) -> IterableDataset:
+    old_columns = dataset.column_names
 
-    def __init__(  # pylint: disable=super-init-not-called
-        self,
-        prompt_tokenizer: PromptTokenizingStrategy,
-        dataset: IterableDataset,
-        **kwargs,
-    ):
-        self.prompt_tokenizer = prompt_tokenizer
-        super().__init__(self.process(dataset).data, **kwargs)
-
-    def process(self, dataset):
-        features = dataset.features.keys()
-        num_proc = min(64, os.cpu_count())
-        return dataset.map(
-            self.prompt_tokenizer.tokenize_prompt,
-            num_proc=num_proc,
-            remove_columns=features,
-        )
+    def format_and_tokenize(row):
+        prompt = parser.parse(row)
+        formatted = formatter.format(prompt, tokenizer.special_tokens_map)
+        item = formatted.to_tokens(tokenizer)
+        for key in item:
+            item[key] = item[key].squeeze(0)
+        return item
+        
+    return dataset.map(format_and_tokenize, remove_columns=old_columns, num_proc=8)
 
 
 # TODO this isn't the best since it can't interleave datasets

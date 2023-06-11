@@ -58,7 +58,7 @@ def load_tokenizer(cfg):
         "LlamaTokenizer",
         "LlamaTokenizerFast",
     ]:
-        tokenizer.pad_token = "[PAD]"
+        tokenizer.pad_token = "[PAD]"  # nosec
 
     LOG.debug(f"EOS: {tokenizer.eos_token_id} / {tokenizer.eos_token}")
     LOG.debug(f"BOS: {tokenizer.bos_token_id} / {tokenizer.bos_token}")

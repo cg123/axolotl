@@ -312,6 +312,19 @@ def load_model(
         )
         model.config.max_position_embeddings = cfg.sequence_len
 
+    if cfg.is_llama_derived_model and (cfg.rope_scale or cfg.rope_alpha):
+        from axolotl.monkeypatch.llama_rope import llama_scale_rope
+
+        scale = getattr(cfg, "rope_scale", 1.0)
+        alpha = getattr(cfg, "rope_alpha", 1.0)
+        logging.info(f"patching with scaled rope (scale = {scale}, alpha = {alpha})")
+        llama_scale_rope(
+            model,
+            scale=scale,
+            alpha=alpha,
+            max_position_embeddings=model.config.max_position_embeddings,
+        )
+
     if not cfg.gptq and (
         (cfg.adapter == "lora" and load_in_8bit)
         or (cfg.adapter == "qlora" and cfg.load_in_4bit)

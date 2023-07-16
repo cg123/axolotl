@@ -1,5 +1,6 @@
 """Callbacks for Trainer class"""
 
+import logging
 import os
 
 from optimum.bettertransformer import BetterTransformer
@@ -41,6 +42,7 @@ class SetOffsetCallback(TrainerCallback):
 
     def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         new_offset = (self.sequence_length // 2 * state.global_step) % (self.max_sequence_length - self.sequence_length)
+        logging.info(f"new rope offset: {new_offset}")
         llama_set_rope_offset(kwargs["model"], new_offset)
         pass
 

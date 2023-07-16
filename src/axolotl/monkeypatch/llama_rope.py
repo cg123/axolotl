@@ -20,7 +20,7 @@ class LlamaComboScaledRope(torch.nn.Module):
         super().__init__()
         if alpha != 1:
             base = base * alpha ** (dim / (dim - 2))
-            
+
         self.scale = 1 / scale
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
         self.register_buffer("inv_freq", inv_freq)
@@ -44,6 +44,8 @@ class LlamaComboScaledRope(torch.nn.Module):
             "sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False
         )
 
+        self.offset = 0  # a special treat for later
+
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
         # This `if` block is unlikely to be run after we build sin/cos in `__init__`. Keep the logic here just in case.
@@ -63,8 +65,12 @@ class LlamaComboScaledRope(torch.nn.Module):
                 "sin_cached", emb.sin()[None, None, :, :].to(x.dtype), persistent=False
             )
         return (
-            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            self.cos_cached[:, :, self.offset : self.offset + seq_len, ...].to(
+                dtype=x.dtype
+            ),
+            self.sin_cached[:, :, self.offset : self.offset + seq_len, ...].to(
+                dtype=x.dtype
+            ),
         )
 
 
@@ -74,3 +80,8 @@ def llama_scale_rope(model: transformers.LlamaForCausalLM, **kwargs):
         layer.self_attn.rotary_emb = LlamaComboScaledRope(
             layer.self_attn.head_dim, **kwargs
         )
+
+
+def llama_set_rope_offset(model: transformers.LlamaForCausalLM, offset: int):
+    for layer in model.model.layers:
+        layer.self_attn.rotary_emb.offset = offset

@@ -25,6 +25,7 @@ from axolotl.utils.callbacks import (
     GPUStatsCallback,
     SaveBetterTransformerModelCallback,
     SavePeftModelCallback,
+    SetOffsetCallback,
 )
 from axolotl.utils.collators import DataCollatorForSeq2Seq
 from axolotl.utils.dataloader import MultipackDistributedDataloader
@@ -568,6 +569,14 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
         "qlora",
     ]:  # only save in rank 0
         callbacks.append(SavePeftModelCallback)
+
+    if cfg.update_offset and cfg.max_packed_sequence_len:
+        callbacks.append(
+            SetOffsetCallback(
+                sequence_length=cfg.max_packed_sequence_len,
+                max_sequence_length=model.max_sequence_length,
+            )
+        )
 
     if hasattr(model, "use_bettertransformer") and model.use_bettertransformer is True:
         callbacks.append(SaveBetterTransformerModelCallback)

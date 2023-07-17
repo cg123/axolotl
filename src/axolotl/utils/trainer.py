@@ -574,7 +574,7 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
         callbacks.append(
             SetOffsetCallback(
                 sequence_length=cfg.max_packed_sequence_len,
-                max_sequence_length=model.max_sequence_length,
+                max_sequence_length=cfg.sequence_len,
             )
         )
 

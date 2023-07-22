@@ -11,6 +11,7 @@ from transformers import (
     TrainingArguments,
 )
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, IntervalStrategy
+
 from axolotl.monkeypatch.llama_rope import llama_set_rope_offset
 
 from axolotl.utils.bench import log_gpu_memory_usage
@@ -44,8 +45,16 @@ class SetOffsetCallback(TrainerCallback):
         self.sequence_length = sequence_length
         self.max_sequence_length = max_sequence_length
 
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        new_offset = (self.sequence_length // 2 * state.global_step) % (self.max_sequence_length - self.sequence_length)
+    def on_step_begin(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        new_offset = (self.sequence_length // 2 * state.global_step) % (
+            self.max_sequence_length - self.sequence_length
+        )
         logging.info(f"new rope offset: {new_offset}")
         llama_set_rope_offset(kwargs["model"], new_offset)
         pass

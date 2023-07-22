@@ -1,7 +1,6 @@
 """Module containing Dataset functionality"""
 
 import logging
-import os
 from typing import List
 
 import torch

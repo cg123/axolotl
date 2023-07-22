@@ -72,8 +72,7 @@ def load_tokenized_prepared_datasets(
             LOG.info("No seed provided, using default seed of 42")
             seed = 42
 
-        prompt_format = cfg.prompt_format if cfg.prompt_format else "alpaca"
-        formatter = get_formatter(prompt_format)
+        formatter = get_formatter(cfg.prompt_format)
 
         datasets = []
         # pylint: disable=invalid-name
@@ -153,9 +152,9 @@ def load_tokenized_prepared_datasets(
                 options=TokenizationOptions(eos_after_output=True),
             )
 
-            datasets.append(ds.map(pipeline))
+            datasets.append(ds.map(pipeline, num_proc=32))
 
-        logging.info("merging and shuffling master dataset")
+        LOG.info("merging and shuffling master dataset")
         dataset = concatenate_datasets(datasets).shuffle(seed=seed)
 
         if cfg.local_rank == 0:

@@ -356,6 +356,17 @@ def load_model(
             max_position_embeddings=model.config.max_position_embeddings,
         )
 
+    if cfg.is_llama_derived_model and cfg.llama_hats:
+        for layer in model.model.layers:
+            layer.requires_grad_(False)
+
+        LOG.info(f"adding {cfg.llama_hats} hats to the llama")
+        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
+        model.config.num_hidden_layers += int(cfg.llama_hats)
+        for _ in range(int(cfg.llama_hats)):
+            model.model.layers.append(LlamaDecoderLayer(model.config))
+
     if not cfg.gptq and (
         (cfg.adapter == "lora" and load_in_8bit)
         or (cfg.adapter == "qlora" and cfg.load_in_4bit)

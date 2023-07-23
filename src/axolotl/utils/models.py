@@ -58,16 +58,28 @@ def load_tokenizer(cfg):
         "LlamaTokenizer",
         "LlamaTokenizerFast",
     ]:
-        tokenizer.pad_token = "[PAD]"  # nosec
+        tokenizer.pad_token = "<pad>"  # nosec
+
 
     LOG.debug(f"EOS: {tokenizer.eos_token_id} / {tokenizer.eos_token}")
     LOG.debug(f"BOS: {tokenizer.bos_token_id} / {tokenizer.bos_token}")
     LOG.debug(f"PAD: {tokenizer.pad_token_id} / {tokenizer.pad_token}")
     LOG.debug(f"UNK: {tokenizer.unk_token_id} / {tokenizer.unk_token}")
 
+    if tokenizer.__class__.__name__ in [
+        "LlamaTokenizer",
+        "LlamaTokenizerFast",
+    ]:
+        tokenizer.pad_token = "<pad>"  # nosec
+
     if tokenizer.__class__.__name__ == "GPTNeoXTokenizerFast":
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    LOG.debug(f"EOS: {tokenizer.eos_token_id} / {tokenizer.eos_token}")
+    LOG.debug(f"BOS: {tokenizer.bos_token_id} / {tokenizer.bos_token}")
+    LOG.debug(f"PAD: {tokenizer.pad_token_id} / {tokenizer.pad_token}")
+    LOG.debug(f"UNK: {tokenizer.unk_token_id} / {tokenizer.unk_token}")
 
     if cfg.special_tokens:
         for k, val in cfg.special_tokens.items():
@@ -334,10 +346,15 @@ def load_model(
         for _ in range(int(cfg.llama_hats)):
             model.model.layers.append(LlamaDecoderLayer(model.config))
 
-    embeddings_len = (
-        math.ceil(len(tokenizer) / 32) * 32
-        if cfg.resize_token_embeddings_to_32x
+    tl_no_pad = (
+        len(tokenizer) - 1
+        if cfg.is_llama_derived_model and "<pad>" in tokenizer.get_vocab()
         else len(tokenizer)
+    )
+    embeddings_len = (
+        math.ceil(tl_no_pad / 32) * 32
+        if cfg.resize_token_embeddings_to_32x
+        else tl_no_pad
     )
     model.resize_token_embeddings(embeddings_len)
 

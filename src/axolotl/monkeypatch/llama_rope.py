@@ -1,6 +1,6 @@
+# pylint: skip-file
 import torch
 import transformers
-
 from transformers.models.llama.modeling_llama import LlamaModel
 
 

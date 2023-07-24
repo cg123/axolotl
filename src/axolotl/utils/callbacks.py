@@ -1,6 +1,5 @@
 """Callbacks for Trainer class"""
 
-import logging
 import os
 
 from optimum.bettertransformer import BetterTransformer
@@ -41,13 +40,15 @@ class SavePeftModelCallback(TrainerCallback):  # pylint: disable=too-few-public-
 
 
 class SetOffsetCallback(TrainerCallback):
+    """Callback to update RoPE offset"""
+
     def __init__(self, sequence_length: int, max_sequence_length: int):
         self.sequence_length = sequence_length
         self.max_sequence_length = max_sequence_length
 
     def on_step_begin(
         self,
-        args: TrainingArguments,
+        _args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
         **kwargs,
@@ -55,9 +56,9 @@ class SetOffsetCallback(TrainerCallback):
         new_offset = (self.sequence_length // 2 * state.global_step) % (
             self.max_sequence_length - self.sequence_length
         )
-        # logging.info(f"new rope offset: {new_offset}")
         llama_set_rope_offset(kwargs["model"], new_offset)
-        pass
+
+        return control
 
 
 class SaveBetterTransformerModelCallback(

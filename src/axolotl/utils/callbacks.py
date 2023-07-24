@@ -55,7 +55,7 @@ class SetOffsetCallback(TrainerCallback):
         new_offset = (self.sequence_length // 2 * state.global_step) % (
             self.max_sequence_length - self.sequence_length
         )
-        logging.info(f"new rope offset: {new_offset}")
+        # logging.info(f"new rope offset: {new_offset}")
         llama_set_rope_offset(kwargs["model"], new_offset)
         pass
 

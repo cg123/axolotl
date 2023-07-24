@@ -86,7 +86,6 @@ def llama_scale_rope(model: transformers.LlamaForCausalLM, **kwargs):
 
 def llama_set_rope_offset(model: transformers.LlamaForCausalLM, offset: int):
     while hasattr(model, "model") and not isinstance(model, LlamaModel):
-        print(type(model))
         model = model.model
 
     for layer in model.layers:

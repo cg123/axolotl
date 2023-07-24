@@ -346,11 +346,12 @@ def load_model(
         for _ in range(int(cfg.llama_hats)):
             model.model.layers.append(LlamaDecoderLayer(model.config))
 
-    tl_no_pad = (
-        len(tokenizer) - 1
-        if cfg.is_llama_derived_model and "<pad>" in tokenizer.get_vocab()
-        else len(tokenizer)
-    )
+    tl_no_pad = len(tokenizer)
+    # tl_no_pad = (
+    #     len(tokenizer) - 1
+    #     if cfg.is_llama_derived_model and "<pad>" in tokenizer.get_vocab()
+    #     else len(tokenizer)
+    # )
     embeddings_len = (
         math.ceil(tl_no_pad / 32) * 32
         if cfg.resize_token_embeddings_to_32x

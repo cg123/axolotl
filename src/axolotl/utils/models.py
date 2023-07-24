@@ -438,7 +438,6 @@ def load_model(
             requires_grad.append(f"{name}: {param.requires_grad}")
     if len(requires_grad) == 0:
         LOG.warning("there are no parameters that require gradient updates")
-    LOG.info(str(requires_grad))
     model.config.use_cache = False
 
     if cfg.flash_optimum:

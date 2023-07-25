@@ -109,6 +109,9 @@ class ReLoRACallback(TrainerCallback):
                 ) + glob.glob(f"{self.last_full_model}/model*.index.json")
                 for path in chunks:
                     shutil.move(path, checkpoint_folder)
+
+                if len(os.listdir(self.last_full_model)) < 1:
+                    os.rmdir(self.last_full_model)
                 self.last_full_model = checkpoint_folder
             else:
                 model.model.save_pretrained(checkpoint_folder, save_safetensors=True)
@@ -245,8 +248,9 @@ def merge_and_save(
                 old_dev = target.weight.device
                 math_dev = "cpu" if cpu_offload else old_dev
 
-                update = lora_delta_weight(target).detach().to(math_dev)
-                new_weight = orig_weight.to(math_dev) + update
+                new_weight = orig_weight.to(math_dev) + lora_delta_weight(
+                    target
+                ).detach().to(math_dev)
                 out_tensors[key + ".weight"] = new_weight
 
                 if reinit:

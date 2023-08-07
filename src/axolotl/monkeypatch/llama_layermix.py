@@ -42,11 +42,20 @@ class NoInit:
 
 
 class LinearMixtureParameterization(nn.Module):
-    def __init__(self, in_features: int, out_features: int, donors: List[nn.Linear]):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        donors: List[nn.Linear],
+        primary_donor: int = -1,
+    ):
         super(LinearMixtureParameterization, self).__init__()
 
         self.donors = donors
         self.scales = nn.Parameter(torch.ones(len(donors)))
+        if primary_donor >= 0:
+            self.scales[primary_donor] = 4
+            self.scales *= len(donors) / self.scales.sum()
 
     def forward(self, *args):
         weights = torch.zeros_like(self.donors[0].weight)
@@ -55,7 +64,9 @@ class LinearMixtureParameterization(nn.Module):
         return weights / len(self.donors)
 
 
-def make_mixture_linear(target: nn.Linear, donors: List[nn.Parameter]):
+def make_mixture_linear(
+    target: nn.Linear, donors: List[nn.Parameter], primary_donor: int = -1
+):
     assert all(
         donor.weight.shape == target.weight.shape for donor in donors
     ), "Donor sizes must match target"
@@ -65,7 +76,9 @@ def make_mixture_linear(target: nn.Linear, donors: List[nn.Parameter]):
     parameterize.register_parametrization(
         target,
         "weight",
-        LinearMixtureParameterization(in_features, out_features, donors),
+        LinearMixtureParameterization(
+            in_features, out_features, donors, primary_donor=primary_donor
+        ),
     )
 
 
@@ -86,16 +99,19 @@ class LinearLayerMixtureLlama(LlamaForCausalLM):
 
         for idx in range(len(self.model.layers)):
             layer: LlamaDecoderLayer = self.model.layers[idx]
+            eqiv_idx = int(idx * new_layer_count / donor.config.num_hidden_layers)
 
             for mlp_attr in ["up_proj", "gate_proj", "down_proj"]:
                 make_mixture_linear(
                     getattr(layer.mlp, mlp_attr),
                     [getattr(dl.mlp, mlp_attr) for dl in donor.model.layers],
+                    primary_donor=eqiv_idx,
                 )
             for attn_attr in ["q_proj", "k_proj", "v_proj", "o_proj"]:
                 make_mixture_linear(
                     getattr(layer.self_attn, attn_attr),
                     [getattr(dl.self_attn, attn_attr) for dl in donor.model.layers],
+                    primary_donor=eqiv_idx,
                 )
 
             with torch.no_grad():

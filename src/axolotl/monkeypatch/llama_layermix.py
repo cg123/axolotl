@@ -52,7 +52,9 @@ class LinearMixtureParameterization(nn.Module):
         super(LinearMixtureParameterization, self).__init__()
 
         self.donors = donors
-        self.scales = nn.Parameter(torch.ones(len(donors)))
+        self.scales = nn.Parameter(
+            torch.ones(len(donors), dtype=donors[0].weight.dtype)
+        )
         if primary_donor >= 0:
             with torch.no_grad():
                 self.scales[primary_donor] = 8
@@ -92,6 +94,8 @@ class LinearLayerMixtureLlama(LlamaForCausalLM):
 
         with NoInit():
             super(LinearLayerMixtureLlama, self).__init__(new_config)
+
+        self.to(dtype=donor.lm_head.weight.dtype)
 
         self.donor = donor.requires_grad_(False)
         with torch.no_grad():

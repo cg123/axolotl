@@ -328,7 +328,7 @@ def train(
 
         if cfg.llama_shorten_to:
             model.bake()
-        
+
         if cfg.adapter == "lora" and cfg.relora_steps:
             model = model.merge_and_unload()
 

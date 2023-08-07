@@ -21,6 +21,8 @@ from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
 
+LOG = logging.getLogger("axolotl")
+
 
 def load_tokenized_prepared_datasets(
     tokenizer, cfg, default_dataset_prepared_path

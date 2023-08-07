@@ -70,7 +70,9 @@ def make_mixture_linear(target: nn.Linear, donors: List[nn.Parameter]):
 
 
 class LinearLayerMixtureLlama(LlamaForCausalLM):
-    def __init__(self, donor: LlamaForCausalLM, new_layer_count: int):
+    def __init__(
+        self, donor: LlamaForCausalLM, new_layer_count: int, lm_grad: bool = False
+    ):
         new_config: LlamaConfig = copy.deepcopy(donor.config)
         new_config.num_hidden_layers = new_layer_count
 
@@ -106,3 +108,6 @@ class LinearLayerMixtureLlama(LlamaForCausalLM):
 
         with torch.no_grad():
             self.lm_head.weight[:, :] = donor.lm_head.weight.data
+
+        self.model.embed_tokens.requires_grad_(lm_grad)
+        self.lm_head.requires_grad_(lm_grad)

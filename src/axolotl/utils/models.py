@@ -339,6 +339,13 @@ def load_model(
             **model_kwargs,
         )
 
+    if cfg.is_llama_derived_model and cfg.llama_shorten_to:
+        from axolotl.monkeypatch.llama_layermix import LinearLayerMixtureLlama
+
+        model = LinearLayerMixtureLlama(
+            model, new_layer_count=int(cfg.llama_shorten_to)
+        )
+
     if cfg.is_llama_derived_model and cfg.llama_hats:
         for layer in model.model.layers:
             layer.requires_grad_(False)

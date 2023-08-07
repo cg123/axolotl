@@ -127,3 +127,17 @@ class LinearLayerMixtureLlama(LlamaForCausalLM):
 
         self.model.embed_tokens.requires_grad_(lm_grad)
         self.lm_head.requires_grad_(lm_grad)
+
+    def bake(self):
+        for layer in self.model.layers:
+            for mlp_attr in ["up_proj", "gate_proj", "down_proj"]:
+                parameterize.remove_parametrizations(
+                    getattr(layer.mlp, mlp_attr), "weight", leave_parametrized=True
+                )
+
+            for attn_attr in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                parameterize.remove_parametrizations(
+                    getattr(layer.self_attn, attn_attr),
+                    "weight",
+                    leave_parametrized=True,
+                )

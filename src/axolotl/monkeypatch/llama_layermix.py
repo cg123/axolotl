@@ -54,8 +54,9 @@ class LinearMixtureParameterization(nn.Module):
         self.donors = donors
         self.scales = nn.Parameter(torch.ones(len(donors)))
         if primary_donor >= 0:
-            self.scales[primary_donor] = 4
-            self.scales *= len(donors) / self.scales.sum()
+            with torch.no_grad():
+                self.scales[primary_donor] = 8
+                self.scales *= len(donors) / self.scales.sum()
 
     def forward(self, *args):
         weights = torch.zeros_like(self.donors[0].weight)

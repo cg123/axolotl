@@ -66,11 +66,15 @@ def load_tokenizer(cfg):
     LOG.debug(f"PAD: {tokenizer.pad_token_id} / {tokenizer.pad_token}")
     LOG.debug(f"UNK: {tokenizer.unk_token_id} / {tokenizer.unk_token}")
 
-    if tokenizer.__class__.__name__ in [
-        "LlamaTokenizer",
-        "LlamaTokenizerFast",
-    ]:
-        tokenizer.pad_token = "<pad>"  # nosec
+    if (
+        tokenizer.__class__.__name__
+        in [
+            "LlamaTokenizer",
+            "LlamaTokenizerFast",
+        ]
+        and not tokenizer.pad_token
+    ):
+        tokenizer.pad_token = "[PAD]"  # nosec
 
     if tokenizer.__class__.__name__ == "GPTNeoXTokenizerFast":
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})

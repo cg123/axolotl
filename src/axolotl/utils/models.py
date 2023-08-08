@@ -54,10 +54,13 @@ def load_tokenizer(cfg):
         **tokenizer_kwargs,
     )
 
-    if tokenizer.__class__.__name__ in [
-        "LlamaTokenizer",
-        "LlamaTokenizerFast",
-    ]:
+    if (
+        tokenizer.__class__.__name__
+        in [
+            "LlamaTokenizer",
+            "LlamaTokenizerFast",
+        ]
+    ):
         tokenizer.pad_token = "<pad>"  # nosec
 
     if tokenizer.__class__.__name__ == "GPTNeoXTokenizerFast":
@@ -340,48 +343,6 @@ def load_model(
         model.config.num_hidden_layers += int(cfg.llama_hats)
         for _ in range(int(cfg.llama_hats)):
             model.model.layers.append(LlamaDecoderLayer(model.config))
-
-    if cfg.is_llama_derived_model and cfg.flash_attention:
-        if cfg.device not in ["mps", "cpu"] and not cfg.inference:
-            from axolotl.monkeypatch.llama_attn_hijack_flash import (
-                replace_llama_attn_with_flash_attn,
-            )
-
-            LOG.info("patching with flash attention")
-            replace_llama_attn_with_flash_attn()
-    elif cfg.is_llama_derived_model and cfg.xformers_attention:
-        from axolotl.monkeypatch.llama_attn_hijack_xformers import (
-            hijack_llama_attention,
-        )
-
-        LOG.info("patching with xformers attention")
-        hijack_llama_attention()
-    elif cfg.is_llama_derived_model and cfg.sdp_attention:
-        from axolotl.monkeypatch.llama_attn_hijack_xformers import (
-            hijack_llama_sdp_attention,
-        )
-
-        LOG.info("patching with sdp attention")
-        hijack_llama_sdp_attention()
-    elif cfg.is_llama_derived_model and cfg.landmark_attention:
-        from axolotl.monkeypatch.llama_landmark_attn import (
-            MEM_TOKEN,
-            patch_llama_with_landmark_attn,
-        )
-
-        LOG.info("patching with landmark attention")
-        patch_llama_with_landmark_attn()
-
-        # Note: This might overwrite previous additional_special_tokens
-        tokenizer.add_special_tokens({"additional_special_tokens": [MEM_TOKEN]})
-
-    if cfg.is_llama_derived_model and cfg.xpos_rope:
-        from axolotl.monkeypatch.xpos_rope_llama_monkey_patch import (
-            replace_llama_rope_with_xpos_rope,
-        )
-
-        LOG.info("patching with xpos rope")
-        replace_llama_rope_with_xpos_rope()
 
     tl_no_pad = len(tokenizer)
     # tl_no_pad = (

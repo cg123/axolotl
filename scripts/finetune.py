@@ -226,7 +226,7 @@ def train(
 
     if "autogptq" in kwargs:
         LOG.info("quantizing with autogptq")
-        from auto_gptq import BaseQuantizeConfig, AutoGPTQForCausalLM
+        from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 
         quantize_config = BaseQuantizeConfig(
             bits=4,

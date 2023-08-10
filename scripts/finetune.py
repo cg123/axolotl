@@ -224,6 +224,27 @@ def train(
         LOG.info("Finished preparing dataset. Exiting...")
         return
 
+    if "autogptq" in kwargs:
+        LOG.info("quantizing with autogptq")
+        from auto_gptq import BaseQuantizeConfig, AutoGPTQForCausalLM
+
+        quantize_config = BaseQuantizeConfig(
+            bits=4,
+            group_size=128,
+            desc_act=True,
+            true_sequential=True,
+        )
+
+        model = AutoGPTQForCausalLM.from_pretrained(cfg.base_model, quantize_config)
+        model.quantize(train_dataset[:1024], batch_size=cfg.micro_batch_size)
+
+        LOG.info("saving quantized model")
+        model.save_quantized(
+            str(Path(cfg.output_dir) / "quantized"),
+            use_safetensors=cfg.save_safetensors,
+        )
+        return
+
     # Load the model and tokenizer
     LOG.info("loading model and (optionally) peft_config...")
     model, peft_config = load_model(cfg, tokenizer)

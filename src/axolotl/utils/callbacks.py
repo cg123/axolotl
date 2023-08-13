@@ -1,5 +1,6 @@
 """Callbacks for Trainer class"""
 
+import logging
 import os
 
 from optimum.bettertransformer import BetterTransformer
@@ -12,7 +13,6 @@ from transformers import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, IntervalStrategy
 
 from axolotl.monkeypatch.llama_rope import llama_set_rope_offset
-
 from axolotl.utils.bench import log_gpu_memory_usage
 
 LOG = logging.getLogger("axolotl.callbacks")

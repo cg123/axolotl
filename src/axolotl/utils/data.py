@@ -20,6 +20,7 @@ from rathe.pipeline import DataPipeline
 from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
+from axolotl.utils.distributed import barrier, is_main_process
 
 LOG = logging.getLogger("axolotl")
 
@@ -154,7 +155,9 @@ def load_tokenized_prepared_datasets(
                 options=TokenizationOptions(eos_after_output=True),
             )
 
-            datasets.append(ds.map(pipeline, num_proc=32))
+            datasets.append(
+                ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
+            )
 
         LOG.info("merging and shuffling master dataset")
         dataset = concatenate_datasets(datasets).shuffle(seed=seed)

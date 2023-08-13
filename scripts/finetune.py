@@ -236,7 +236,9 @@ def train(
         )
 
         model = AutoGPTQForCausalLM.from_pretrained(cfg.base_model, quantize_config)
-        model.quantize(train_dataset[:1024], batch_size=cfg.micro_batch_size)
+        model.quantize(
+            train_dataset.select(range(128)), batch_size=cfg.micro_batch_size
+        )
 
         LOG.info("saving quantized model")
         model.save_quantized(

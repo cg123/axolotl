@@ -54,13 +54,10 @@ def load_tokenizer(cfg):
         **tokenizer_kwargs,
     )
 
-    if (
-        tokenizer.__class__.__name__
-        in [
-            "LlamaTokenizer",
-            "LlamaTokenizerFast",
-        ]
-    ):
+    if tokenizer.__class__.__name__ in [
+        "LlamaTokenizer",
+        "LlamaTokenizerFast",
+    ]:
         tokenizer.pad_token = "<pad>"  # nosec
 
     if tokenizer.__class__.__name__ == "GPTNeoXTokenizerFast":
@@ -325,24 +322,6 @@ def load_model(
             trust_remote_code=cfg.trust_remote_code or False,
             **model_kwargs,
         )
-
-    if cfg.is_llama_derived_model and cfg.llama_shorten_to:
-        from axolotl.monkeypatch.llama_layermix import LinearLayerMixtureLlama
-
-        model = LinearLayerMixtureLlama(
-            model, new_layer_count=int(cfg.llama_shorten_to)
-        )
-
-    if cfg.is_llama_derived_model and cfg.llama_hats:
-        for layer in model.model.layers:
-            layer.requires_grad_(False)
-
-        LOG.info(f"adding {cfg.llama_hats} hats to the llama")
-        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
-        model.config.num_hidden_layers += int(cfg.llama_hats)
-        for _ in range(int(cfg.llama_hats)):
-            model.model.layers.append(LlamaDecoderLayer(model.config))
 
     tl_no_pad = len(tokenizer)
     # tl_no_pad = (

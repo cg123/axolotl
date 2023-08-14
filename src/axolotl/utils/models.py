@@ -322,7 +322,7 @@ def load_model(
             **model_kwargs,
         )
 
-    if not cfg.no_seize_embeddings:
+    if not cfg.no_resize_embeddings:
         tl_no_pad = len(tokenizer)
         # tl_no_pad = (
         #     len(tokenizer) - 1

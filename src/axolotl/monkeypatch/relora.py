@@ -80,6 +80,7 @@ class ReLoRACallback(TrainerCallback):
                     reinit=True,
                     quantized=self.quantised,
                     actually_save=is_main_process(),
+                    cpu_offload=self.cpu_offload,
                 )
                 reset_optimizer(optimizer)
 
@@ -185,11 +186,14 @@ def lora_delta_weight(layer: peft.tuners.lora.LoraLayer, device) -> torch.Tensor
         layer, peft.tuners.lora.Linear4bit
     ):
         adapter = layer.active_adapter
-        return peft.utils.transpose(
-            layer.lora_B[adapter].weight.detach().to(device)
-            @ layer.lora_A[adapter].weight.detach().to(device),
-            getattr(layer, "fan_in_fan_out", False),
-        ) * layer.scaling[adapter]
+        return (
+            peft.utils.transpose(
+                layer.lora_B[adapter].weight.detach().to(device)
+                @ layer.lora_A[adapter].weight.detach().to(device),
+                getattr(layer, "fan_in_fan_out", False),
+            )
+            * layer.scaling[adapter]
+        )
     else:
         return layer.get_delta_weight().to(device)
 

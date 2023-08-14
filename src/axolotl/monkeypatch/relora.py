@@ -226,6 +226,7 @@ def merge_and_save(
 
     os.makedirs(model_dst, exist_ok=True)
     shard_paths = sharded_paths(model_src, key_list)
+    out_shard_paths = {}
 
     unique_shards = list(set(shard_paths.values()))
     for shard_path in unique_shards:
@@ -297,6 +298,7 @@ def merge_and_save(
                 out_shard_name.replace("pytorch_model", "model").rstrip(".bin")
                 + ".safetensors"
             )
+        out_shard_paths[key] = out_shard_name
 
         shard_fn = str(Path(model_dst) / out_shard_name)
         LOG.info(f"saving tensors to {shard_fn}")
@@ -306,4 +308,4 @@ def merge_and_save(
 
     if len(unique_shards) > 1:
         with open(str(Path(model_dst, "model.safetensors.index.json")), "w") as fd:
-            json.dump({"metadata": {}, "weight_map": shard_paths}, fd)
+            json.dump({"metadata": {}, "weight_map": out_shard_paths}, fd)

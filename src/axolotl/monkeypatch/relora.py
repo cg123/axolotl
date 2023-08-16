@@ -1,4 +1,4 @@
-# pylint: skip-file
+"""Implements the ReLoRA training procedure from https://arxiv.org/abs/2307.05695, minus the initial full fine-tune."""
 import glob
 import json
 import logging
@@ -35,13 +35,16 @@ def reset_optimizer(optimizer: torch.optim.Optimizer):
             for key in param_state:
                 if "qmap" in key:
                     continue
-                elif key == "step" and isinstance(param_state[key], int):
+
+                if key == "step" and isinstance(param_state[key], int):
                     param_state[key] = 0
                 else:
                     param_state[key] = torch.zeros_like(param_state[key])
 
 
 class ReLoRACallback(TrainerCallback):
+    """Callback to merge LoRA weights into the base model and save full-weight checkpoints"""
+
     def __init__(self, cfg: DictDefault):
         self.relora_steps = cfg.relora_steps
         self.cpu_offload = cfg.relora_cpu_offload
@@ -96,7 +99,7 @@ class ReLoRACallback(TrainerCallback):
         state: TrainerState,
         control: TrainerControl,
         model: peft.LoraModel,
-        **kwargs,
+        **_kwargs,
     ):
         checkpoint_folder = os.path.join(
             args.output_dir,
@@ -161,6 +164,8 @@ class ReLoRACallback(TrainerCallback):
 
 
 class ReLoRAScheduler(LRScheduler):
+    """Wraps another scheduler to apply per-lora-restart learning rate warmups."""
+
     def __init__(
         self,
         optimizer: Optimizer,
@@ -185,10 +190,10 @@ class ReLoRAScheduler(LRScheduler):
         else:
             cycle_t = min(1.0, (step % self.relora_steps) / self.warmup_steps)
             scale = cycle_t * (1 - self.min_lr_scale) + self.min_lr_scale
+
         if isinstance(original, Sequence):
             return [lr * scale for lr in original]
-        else:
-            return original * scale
+        return original * scale
 
 
 def sharded_paths(path: str, keys: List[str]) -> Dict[str, str]:
@@ -200,15 +205,14 @@ def sharded_paths(path: str, keys: List[str]) -> Dict[str, str]:
 
     index_path = str(Path(path) / f"{model_name}.index.json")
     if os.path.exists(index_path):
-        data = json.load(open(index_path, "r"))
+        with open(index_path, "r", encoding="utf-8") as file:
+            data = json.load(file)
         return data["weight_map"]
     return {key + ".weight": model_name for key in keys}
 
 
 def lora_delta_weight(layer: peft.tuners.lora.LoraLayer, device) -> torch.Tensor:
-    if isinstance(layer, peft.tuners.lora.Linear8bitLt) or isinstance(
-        layer, peft.tuners.lora.Linear4bit
-    ):
+    if isinstance(layer, (peft.tuners.lora.Linear8bitLt, peft.tuners.lora.Linear4bit)):
         adapter = layer.active_adapter
         return (
             peft.utils.transpose(
@@ -218,8 +222,8 @@ def lora_delta_weight(layer: peft.tuners.lora.LoraLayer, device) -> torch.Tensor
             )
             * layer.scaling[adapter]
         )
-    else:
-        return layer.get_delta_weight().to(device)
+
+    return layer.get_delta_weight().to(device)
 
 
 def merge_and_save(
@@ -231,13 +235,13 @@ def merge_and_save(
     cpu_offload: bool = False,
     actually_save: bool = True,
 ):
-    LOG.warn(f"cpu_offload: {cpu_offload}")
     key_list = [key for key, _ in model.model.named_modules() if "lora" not in key]
 
-    modules = {}
+    modules: Dict[str, peft.tuners.lora.LoraLayer] = {}
 
     for key in key_list:
         try:
+            # pylint: disable=protected-access
             _parent, target, _target_name = peft.utils._get_submodules(model.model, key)
         except AttributeError:
             continue
@@ -246,8 +250,7 @@ def merge_and_save(
             modules[key] = target
 
     if not quantized:
-        for key in modules:
-            target = modules[key]
+        for key, target in modules.items():
             update = target.get_delta_weight(target.active_adapter).detach()
             target.weight.data += update
 
@@ -272,13 +275,11 @@ def merge_and_save(
             if "state_dict" in in_tensors:
                 in_tensors = in_tensors["state_dict"]
 
-        for key in modules:
+        for key, target in modules.items():
             if (key + ".weight") not in shard_paths or shard_paths[
                 key + ".weight"
             ] != shard_path:
                 continue
-
-            target = modules[key]
 
             orig_weight = in_tensors[key + ".weight"]
             old_dev = target.weight.device
@@ -334,5 +335,7 @@ def merge_and_save(
         torch.cuda.empty_cache()
 
     if len(unique_shards) > 1:
-        with open(str(Path(model_dst, "model.safetensors.index.json")), "w") as fd:
-            json.dump({"metadata": {}, "weight_map": out_shard_paths}, fd)
+        with open(
+            str(Path(model_dst, "model.safetensors.index.json")), "w", encoding="utf-8"
+        ) as file:
+            json.dump({"metadata": {}, "weight_map": out_shard_paths}, file)

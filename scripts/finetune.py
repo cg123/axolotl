@@ -218,7 +218,6 @@ def train(
             true_sequential=True,
         )
 
-        
         LOG.info("loading model")
         model = AutoGPTQForCausalLM.from_pretrained(
             cfg.base_model,
@@ -226,7 +225,7 @@ def train(
             low_cpu_mem_usage=True,
             torch_dtype=torch.bfloat16,
         )
-        
+
         num_samples = cfg.autogptq_samples if cfg.autogptq_samples else 128
         model.quantize(
             train_dataset.select(range(num_samples)),

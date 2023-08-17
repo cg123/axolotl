@@ -217,6 +217,7 @@ def train(
             desc_act=True,
             true_sequential=True,
         )
+        LOG.info(str(quantize_config))
 
         LOG.info("loading model")
         model = AutoGPTQForCausalLM.from_pretrained(

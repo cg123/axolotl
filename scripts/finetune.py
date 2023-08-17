@@ -212,15 +212,26 @@ def train(
         from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 
         quantize_config = BaseQuantizeConfig(
-            bits=4,
-            group_size=128,
+            bits=cfg.autogptq_bits if cfg.autogptq_bits else 4,
+            group_size=cfg.autogptq_bits if cfg.autogptq_bits else -1,
             desc_act=True,
             true_sequential=True,
         )
 
-        model = AutoGPTQForCausalLM.from_pretrained(cfg.base_model, quantize_config)
+        
+        LOG.info("loading model")
+        model = AutoGPTQForCausalLM.from_pretrained(
+            cfg.base_model,
+            quantize_config,
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.bfloat16,
+        )
+        
+        num_samples = cfg.autogptq_samples if cfg.autogptq_samples else 128
         model.quantize(
-            train_dataset.select(range(128)), batch_size=cfg.micro_batch_size
+            train_dataset.select(range(num_samples)),
+            batch_size=cfg.micro_batch_size,
+            cache_examples_on_gpu=bool(cfg.autogptq_gpu_cache),
         )
 
         LOG.info("saving quantized model")

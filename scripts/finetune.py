@@ -213,7 +213,7 @@ def train(
 
         quantize_config = BaseQuantizeConfig(
             bits=cfg.autogptq_bits if cfg.autogptq_bits else 4,
-            group_size=cfg.autogptq_bits if cfg.autogptq_bits else -1,
+            group_size=cfg.autogptq_group_size if cfg.autogptq_group_size else -1,
             desc_act=True,
             true_sequential=True,
         )

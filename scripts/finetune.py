@@ -25,7 +25,7 @@ from axolotl.utils.distributed import is_main_process
 from axolotl.utils.models import load_model, load_tokenizer
 from axolotl.utils.tokenization import check_dataset_labels
 from axolotl.utils.trainer import setup_trainer
-from axolotl.utils.wandb import setup_wandb_env_vars, wandb_log_config
+from axolotl.utils.wandb import setup_wandb_env_vars
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 src_dir = os.path.join(project_root, "src")
@@ -294,8 +294,6 @@ def train(
     trainer = setup_trainer(
         cfg, train_dataset, eval_dataset, model, tokenizer, total_num_steps
     )
-
-    wandb_log_config(cfg)
 
     model.config.use_cache = False
 

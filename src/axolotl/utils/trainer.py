@@ -24,6 +24,7 @@ from transformers.trainer_pt_utils import get_parameter_names
 from axolotl.monkeypatch.relora import ReLoRACallback, ReLoRAScheduler
 from axolotl.utils.callbacks import (
     GPUStatsCallback,
+    LogConfigToWandbCallback,
     SaveBetterTransformerModelCallback,
     SavePeftModelCallback,
     SetOffsetCallback,
@@ -606,6 +607,9 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
 
     callbacks = []
     callbacks.append(GPUStatsCallback(cfg))
+
+    if cfg.wandb_project:
+        callbacks.append(LogConfigToWandbCallback(cfg))
 
     if cfg.relora_steps:
         callbacks.append(ReLoRACallback(cfg))

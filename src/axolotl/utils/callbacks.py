@@ -14,6 +14,7 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, IntervalStrategy
 
 from axolotl.monkeypatch.llama_rope import llama_set_rope_offset
 from axolotl.utils.bench import log_gpu_memory_usage
+from axolotl.utils.wandb import wandb_log_config
 
 LOG = logging.getLogger("axolotl.callbacks")
 
@@ -38,6 +39,23 @@ class SavePeftModelCallback(TrainerCallback):  # pylint: disable=too-few-public-
             peft_model_path, save_safetensors=args.save_safetensors
         )
 
+        return control
+
+
+class LogConfigToWandbCallback(TrainerCallback):
+    """Log the Axolotl configuration to wandb when training starts."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def on_train_begin(
+        self,
+        _args: TrainingArguments,
+        _state: TrainerState,
+        control: TrainerControl,
+        **_kwargs,
+    ):
+        wandb_log_config(self.cfg)
         return control
 
 

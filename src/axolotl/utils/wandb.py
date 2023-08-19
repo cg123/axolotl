@@ -3,6 +3,12 @@
 import os
 
 
+def wandb_log_config(cfg):
+    import wandb
+
+    wandb.config.update({"axolotl_config": dict(cfg.items())})
+
+
 def setup_wandb_env_vars(cfg):
     if cfg.wandb_mode and cfg.wandb_mode == "offline":
         os.environ["WANDB_MODE"] = cfg.wandb_mode

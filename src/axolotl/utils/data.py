@@ -20,6 +20,7 @@ from rathe.pipeline import DataPipeline
 from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
+from axolotl.utils.dict import DictDefault
 from axolotl.utils.distributed import is_main_process, zero_first
 from axolotl.utils.trainer import (
     calculate_total_num_steps,
@@ -32,9 +33,10 @@ DEFAULT_DATASET_PREPARED_PATH = "last_run_prepared"
 
 def prepare_dataset(cfg, tokenizer):
     if not cfg.pretraining_dataset:
-        train_dataset, eval_dataset = load_prepare_datasets(
-            tokenizer, cfg, DEFAULT_DATASET_PREPARED_PATH
-        )
+        with zero_first(is_main_process()):
+            train_dataset, eval_dataset = load_prepare_datasets(
+                tokenizer, cfg, DEFAULT_DATASET_PREPARED_PATH
+            )
     else:
         train_dataset = load_pretraining_dataset(
             cfg.pretraining_dataset,
@@ -141,8 +143,15 @@ def load_tokenized_prepared_datasets(
                         split=None,
                     )
                 elif local_path.is_file():
+                    ds_type = "json"
+                    if d.ds_type:
+                        ds_type = d.ds_type
+                    elif ".parquet" in d.path:
+                        ds_type = "parquet"
+                    elif ".arrow" in d.path:
+                        ds_type = "arrow"
                     ds = load_dataset(
-                        "json",
+                        ds_type,
                         name=d.name,
                         data_files=d.path,
                         streaming=False,

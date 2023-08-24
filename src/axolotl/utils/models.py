@@ -11,6 +11,7 @@ import bitsandbytes as bnb
 import torch
 import transformers
 from optimum.bettertransformer import BetterTransformer
+from peft.tuners.lora import LoraLayer
 from transformers import (  # noqa: F401
     AutoConfig,
     AutoModelForCausalLM,
@@ -57,7 +58,7 @@ def load_tokenizer(cfg):
         "LlamaTokenizer",
         "LlamaTokenizerFast",
     ]:
-        tokenizer.pad_token = "<pad>"  # nosec
+        tokenizer.pad_token = "<eos>"  # nosec
 
     if tokenizer.__class__.__name__ == "GPTNeoXTokenizerFast":
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})
@@ -102,7 +103,7 @@ def load_model(
             )
 
             LOG.info("patching with flash attention")
-            replace_llama_attn_with_flash_attn()
+            replace_llama_attn_with_flash_attn(packed=cfg.sample_packing)
     elif cfg.is_llama_derived_model and cfg.xformers_attention:
         from axolotl.monkeypatch.llama_attn_hijack_xformers import (
             hijack_llama_attention,
@@ -111,9 +112,7 @@ def load_model(
         LOG.info("patching with xformers attention")
         hijack_llama_attention()
     elif cfg.is_llama_derived_model and cfg.sdp_attention:
-        from axolotl.monkeypatch.llama_attn_hijack_xformers import (
-            hijack_llama_sdp_attention,
-        )
+        from axolotl.monkeypatch.llama_attn_hijack_sdp import hijack_llama_sdp_attention
 
         LOG.info("patching with sdp attention")
         hijack_llama_sdp_attention()
@@ -147,12 +146,6 @@ def load_model(
         LOG.info("patching _expand_mask")
         hijack_expand_mask()
 
-    if cfg.bf16 or cfg.bfloat16:
-        torch_dtype = torch.bfloat16
-    elif cfg.load_in_8bit or cfg.fp16 or cfg.float16:
-        torch_dtype = torch.float16
-    else:
-        torch_dtype = torch.float32
     try:
         if cfg.gptq:
             from alpaca_lora_4bit.monkeypatch.peft_tuners_lora_monkey_patch import (
@@ -184,7 +177,7 @@ def load_model(
             load_in_4bit=True,
             llm_int8_threshold=6.0,
             llm_int8_has_fp16_weight=False,
-            bnb_4bit_compute_dtype=torch_dtype,
+            bnb_4bit_compute_dtype=cfg.torch_dtype,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
         )
@@ -243,7 +236,7 @@ def load_model(
                 device_map=cfg.device_map,
                 load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
                 load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
-                torch_dtype=torch_dtype,
+                torch_dtype=cfg.torch_dtype,
                 **model_kwargs,
             )
         # elif model_type == "GPTNeoXForCausalLM" and cfg.flash_attention:
@@ -278,7 +271,7 @@ def load_model(
                 device_map=cfg.device_map,
                 load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
                 load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
-                torch_dtype=torch_dtype,
+                torch_dtype=cfg.torch_dtype,
                 trust_remote_code=cfg.trust_remote_code or False,
                 **model_kwargs,
             )
@@ -309,7 +302,7 @@ def load_model(
                 device_map=cfg.device_map,
                 load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
                 load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
-                torch_dtype=torch_dtype,
+                torch_dtype=cfg.torch_dtype,
                 trust_remote_code=cfg.trust_remote_code or False,
                 **model_kwargs,
             )
@@ -323,7 +316,7 @@ def load_model(
             device_map=cfg.device_map,
             load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
             load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
-            torch_dtype=torch_dtype,
+            torch_dtype=cfg.torch_dtype,
             trust_remote_code=cfg.trust_remote_code or False,
             **model_kwargs,
         )
@@ -377,16 +370,6 @@ def load_model(
         model = prepare_model_for_kbit_training(
             model, use_gradient_checkpointing=cfg.gradient_checkpointing
         )
-
-        # LlamaRMSNorm layers are in fp32 after kbit_training, so we need to
-        # convert them back to fp16/bf16 for flash-attn compatibility.
-        if cfg.flash_attention and cfg.is_llama_derived_model:
-            for name, module in model.named_modules():
-                if "norm" in name:
-                    module.to(torch_dtype)
-                if "lm_head" in name or "embed_tokens" in name:
-                    if hasattr(module, "weight"):
-                        module.to(torch_dtype)
 
     model, lora_config = load_adapter(model, cfg, cfg.adapter)
 
@@ -460,7 +443,7 @@ def load_llama_adapter(model, cfg):
     )
 
     if cfg.lora_model_dir:
-        LOG.info("Loading pretained LORA")
+        LOG.debug("Loading pretained PEFT - llama_adapter")
         model = PeftModel.from_pretrained(
             model,
             cfg.lora_model_dir,
@@ -522,6 +505,7 @@ def load_lora(model, cfg):
     )
 
     if cfg.lora_model_dir:
+        LOG.debug("Loading pretained PEFT - LoRA")
         model = PeftModel.from_pretrained(
             model,
             cfg.lora_model_dir,
@@ -529,6 +513,22 @@ def load_lora(model, cfg):
         )
     else:
         model = get_peft_model(model, lora_config)
+
+    for name, module in model.named_modules():
+        if isinstance(module, LoraLayer):
+            module = module.to(cfg.torch_dtype)
+        if "norm" in name:
+            module = module.to(torch.float32)
+        if "lm_head" in name or "embed_tokens" in name:
+            if hasattr(module, "weight"):
+                module = module.to(cfg.torch_dtype)
+
+    # LlamaRMSNorm layers are in fp32 after kbit_training, so we need to
+    # convert them back to fp16/bf16 for flash-attn compatibility.
+    if cfg.flash_attention and cfg.is_llama_derived_model:
+        for name, module in model.named_modules():
+            if "norm" in name:
+                module = module.to(cfg.torch_dtype)
 
     model.print_trainable_parameters()
 

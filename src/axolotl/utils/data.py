@@ -134,7 +134,6 @@ def load_tokenized_prepared_datasets(
             if local_path.exists():
                 if local_path.is_dir():
                     # TODO dirs with arrow or parquet files could be loaded with `load_from_disk`
-                    ds = load_from_disk(d.path)
                     ds = load_dataset(
                         d.path,
                         name=d.name,

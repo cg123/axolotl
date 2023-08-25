@@ -198,7 +198,6 @@ def load_tokenized_prepared_datasets(
                 options=TokenizationOptions(eos_after_output=True),
             )
 
-            ds = ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
             if d.truncate:
 
                 def snip(e):
@@ -206,10 +205,18 @@ def load_tokenized_prepared_datasets(
                     for key in e:
                         if isinstance(e[key], torch.Tensor):
                             res[key] = e[key][: cfg.sequence_len]
+                        else:
+                            res[key] = e[key]
 
-                ds = ds.map(snip, num_proc=32)
+                ds = ds.map(
+                    lambda e: snip(pipeline(e)),
+                    num_proc=32,
+                    remove_columns=ds.column_names,
+                )
+            else:
+                ds = ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
 
-            datasets.append()
+            datasets.append(ds)
 
         LOG.info("merging and shuffling master dataset")
         dataset = concatenate_datasets(datasets).shuffle(seed=seed)

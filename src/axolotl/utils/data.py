@@ -20,7 +20,6 @@ from rathe.pipeline import DataPipeline
 from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
-from axolotl.utils.dict import DictDefault
 from axolotl.utils.distributed import is_main_process, zero_first
 from axolotl.utils.trainer import (
     calculate_total_num_steps,
@@ -135,6 +134,7 @@ def load_tokenized_prepared_datasets(
             if local_path.exists():
                 if local_path.is_dir():
                     # TODO dirs with arrow or parquet files could be loaded with `load_from_disk`
+                    ds = load_from_disk(d.path)
                     ds = load_dataset(
                         d.path,
                         name=d.name,
@@ -199,9 +199,18 @@ def load_tokenized_prepared_datasets(
                 options=TokenizationOptions(eos_after_output=True),
             )
 
-            datasets.append(
-                ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
-            )
+            ds = ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
+            if d.truncate:
+
+                def snip(e):
+                    res = {}
+                    for key in e:
+                        if isinstance(e[key], torch.Tensor):
+                            res[key] = e[key][: cfg.sequence_len]
+
+                ds = ds.map(snip, num_proc=32)
+
+            datasets.append()
 
         LOG.info("merging and shuffling master dataset")
         dataset = concatenate_datasets(datasets).shuffle(seed=seed)

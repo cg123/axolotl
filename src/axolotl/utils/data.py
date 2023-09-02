@@ -20,7 +20,6 @@ from rathe.pipeline import DataPipeline
 from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
-from axolotl.utils.dict import DictDefault
 from axolotl.utils.distributed import is_main_process, zero_first
 from axolotl.utils.trainer import (
     calculate_total_num_steps,
@@ -120,7 +119,7 @@ def load_tokenized_prepared_datasets(
             for dataset in dataset_configs:
                 if dataset.name and isinstance(dataset.name, list):
                     for name in dataset.name:
-                        yield DictDefault({**dataset, "name": name})
+                        yield {**dataset, "name": name}
                 else:
                     yield dataset
 
@@ -209,12 +208,13 @@ def load_tokenized_prepared_datasets(
             )
 
             if d.truncate:
+                slen = cfg.sequence_len
 
                 def snip(e):
                     res = {}
                     for key in e:
                         if isinstance(e[key], torch.Tensor):
-                            res[key] = e[key][: cfg.sequence_len]
+                            res[key] = e[key][:slen]
                         else:
                             res[key] = e[key]
 

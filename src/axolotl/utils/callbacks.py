@@ -31,7 +31,6 @@ from axolotl.utils.distributed import (
     is_main_process,
     zero_first,
 )
-from axolotl.utils.wandb import wandb_log_config
 
 if TYPE_CHECKING:
     from axolotl.utils.trainer import AxolotlTrainingArguments
@@ -60,23 +59,6 @@ class SavePeftModelCallback(TrainerCallback):  # pylint: disable=too-few-public-
             peft_model_path, save_safetensors=args.save_safetensors
         )
 
-        return control
-
-
-class LogConfigToWandbCallback(TrainerCallback):
-    """Log the Axolotl configuration to wandb when training starts."""
-
-    def __init__(self, cfg):
-        self.cfg = cfg
-
-    def on_train_begin(
-        self,
-        _args: TrainingArguments,
-        _state: TrainerState,
-        control: TrainerControl,
-        **_kwargs,
-    ):
-        wandb_log_config(self.cfg)
         return control
 
 

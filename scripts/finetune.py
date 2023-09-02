@@ -90,9 +90,7 @@ def shard(
     model.save_pretrained(cfg.output_dir, safe_serialization=safe_serialization)
 
 
-def do_autogptq(
-    *, cfg: DictDefault, cli_args: TrainerCliArgs, dataset_meta: TrainDatasetMeta
-):
+def do_autogptq(*, cfg: DictDefault, dataset_meta: TrainDatasetMeta):
     LOG.info("quantizing with autogptq")
     from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 
@@ -316,9 +314,7 @@ def do_cli(config: Path = Path("examples/"), **kwargs):
         dataset_meta = load_datasets(cfg=parsed_cfg, cli_args=parsed_cli_args)
 
         if parsed_cli_args.autogptq:
-            do_autogptq(
-                cfg=parsed_cfg, cli_args=parsed_cli_args, dataset_meta=dataset_meta
-            )
+            do_autogptq(cfg=parsed_cfg, dataset_meta=dataset_meta)
             return
 
         if parsed_cli_args.prepare_ds_only:

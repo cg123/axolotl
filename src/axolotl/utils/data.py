@@ -20,6 +20,7 @@ from rathe.pipeline import DataPipeline
 from transformers import PreTrainedTokenizerBase
 
 from axolotl.datasets import ConstantLengthDataset
+from axolotl.utils.dict import DictDefault
 from axolotl.utils.distributed import is_main_process, zero_first
 from axolotl.utils.trainer import (
     calculate_total_num_steps,

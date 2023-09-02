@@ -28,6 +28,7 @@ class TrainerCliArgs:
     prepare_ds_only: bool = field(default=False)
     prompter: Optional[str] = field(default=None)
     shard: bool = field(default=False)
+    autogptq: bool = field(default=False)
 
 
 def load_model_and_tokenizer(

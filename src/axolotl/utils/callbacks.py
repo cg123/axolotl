@@ -24,7 +24,6 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, IntervalStrategy
 
 from axolotl.monkeypatch.llama_rope import llama_set_rope_offset
 from axolotl.utils.bench import log_gpu_memory_usage
-from axolotl.utils.wandb import wandb_log_config
 from axolotl.utils.distributed import (
     barrier,
     gather_scalar_from_all_ranks,
@@ -32,6 +31,7 @@ from axolotl.utils.distributed import (
     is_main_process,
     zero_first,
 )
+from axolotl.utils.wandb import wandb_log_config
 
 if TYPE_CHECKING:
     from axolotl.utils.trainer import AxolotlTrainingArguments

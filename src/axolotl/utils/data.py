@@ -61,6 +61,16 @@ def prepare_dataset(cfg, tokenizer):
     return train_dataset, eval_dataset, total_num_steps
 
 
+def snip(e, slen: int):
+    res = {}
+    for key in e:
+        if isinstance(e[key], (torch.Tensor, list)):
+            res[key] = e[key][:slen]
+        else:
+            res[key] = e[key]
+    return res
+
+
 def load_tokenized_prepared_datasets(
     tokenizer, cfg, default_dataset_prepared_path
 ) -> DatasetDict:
@@ -210,16 +220,8 @@ def load_tokenized_prepared_datasets(
             if d.truncate:
                 slen = cfg.sequence_len
 
-                def snip(e):
-                    res = {}
-                    for key in e:
-                        if isinstance(e[key], torch.Tensor):
-                            res[key] = e[key][:slen]
-                        else:
-                            res[key] = e[key]
-
                 ds = ds.map(
-                    lambda e: snip(pipeline(e)),
+                    lambda e: snip(pipeline(e), slen),
                     num_proc=32,
                     remove_columns=ds.column_names,
                 )

@@ -80,14 +80,15 @@ def train(
 
     model.config.use_cache = False
 
-    if torch.__version__ >= "2" and sys.platform != "win32":
-        LOG.info("Compiling torch model")
-        model = torch.compile(model)
-
     # go ahead and presave, so we have the adapter config available to inspect
     if peft_config:
         LOG.info(f"Pre-saving adapter config to {cfg.output_dir}")
         peft_config.save_pretrained(cfg.output_dir)
+    # additionally presave the tokenizer and model configs
+    if not Path(cfg.output_dir).is_dir():
+        os.makedirs(cfg.output_dir, exist_ok=True)
+    tokenizer.save_pretrained(str(Path(cfg.output_dir)))
+    model.config.save_pretrained(str(Path(cfg.output_dir)))
 
     # In case we want to stop early with ctrl+c, this is a nice to have to save the pretrained model
     if cfg.local_rank == 0:
@@ -106,9 +107,6 @@ def train(
     if cfg.group_by_length:
         LOG.info("hang tight... sorting dataset for group_by_length")
 
-    if not Path(cfg.output_dir).is_dir():
-        os.makedirs(cfg.output_dir, exist_ok=True)
-    tokenizer.save_pretrained(cfg.output_dir)
     if cfg.flash_optimum:
         with torch.backends.cuda.sdp_kernel(
             enable_flash=True, enable_math=True, enable_mem_efficient=True
@@ -118,6 +116,10 @@ def train(
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     LOG.info(f"Training Completed!!! Saving pre-trained model to {cfg.output_dir}")
+
+    if trainer.is_fsdp_enabled:
+        trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
+        LOG.info("Set FSDP state dict type to FULL_STATE_DICT for saving.")
 
     if cfg.relora_steps:
         if cfg.adapter == "lora" and not (cfg.load_in_4bit or cfg.load_in_8bit):

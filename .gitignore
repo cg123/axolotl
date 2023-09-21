@@ -163,5 +163,7 @@ cython_debug/
 .idea/
 
 # run data
-/wandb
 /last_run_prepared
+# WandB
+# wandb creates a folder to store logs for training runs
+wandb

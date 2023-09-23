@@ -330,19 +330,15 @@ def load_model(
         )
 
     if not cfg.no_resize_embeddings:
-        tl_no_pad = len(tokenizer)
-        # tl_no_pad = (
-        #     len(tokenizer) - 1
-        #     if cfg.is_llama_derived_model and "<pad>" in tokenizer.get_vocab()
-        #     else len(tokenizer)
-        # )
+        tl = len(tokenizer)
         embeddings_len = (
-            math.ceil(tl_no_pad / 32) * 32
+            math.ceil(tl / 32) * 32
             if cfg.resize_token_embeddings_to_32x
-            else tl_no_pad
+            else tl
         )
-        LOG.warning(f"resizing token embeddings to {embeddings_len}")
-        model.resize_token_embeddings(embeddings_len)
+        if model.get_input_embeddings().num_embeddings < embeddings_len:
+            LOG.warning(f"resizing token embeddings to {embeddings_len}")
+            model.resize_token_embeddings(embeddings_len)
 
     if (
         hasattr(model.config, "max_position_embeddings")

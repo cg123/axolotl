@@ -1,89 +1,45 @@
-"""Flash attention monkey patch for llama model"""
-
-# copied from https://github.com/lm-sys/FastChat/blob/main/fastchat/train/llama_flash_attn_monkey_patch.py
+"""Flash attention monkey patch for mistral model"""
+# pylint: disable=duplicate-code
 
 import logging
-import warnings
-from functools import partial
 from typing import List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 import transformers
 from einops import rearrange
 from flash_attn.bert_padding import pad_input, unpad_input
-from transformers.modeling_outputs import BaseModelOutputWithPast
-from transformers.models.llama.modeling_llama import (
-    LlamaDecoderLayer as OriginalLlamaDecoderLayer,
+from flash_attn.flash_attn_interface import (  # pylint: disable=ungrouped-imports
+    flash_attn_kvpacked_func,
+    flash_attn_varlen_kvpacked_func,
+    flash_attn_varlen_qkvpacked_func,
 )
-from transformers.models.llama.modeling_llama import apply_rotary_pos_emb, repeat_kv
+from transformers.modeling_outputs import BaseModelOutputWithPast
+from transformers.models.mistral.modeling_mistral import (
+    MistralDecoderLayer as OriginalMistralDecoderLayer,
+)
+from transformers.models.mistral.modeling_mistral import apply_rotary_pos_emb, repeat_kv
 
 from axolotl.monkeypatch.utils import get_cu_seqlens_from_pos_ids
 
-try:
-    from flash_attn.flash_attn_interface import (  # pylint: disable=ungrouped-imports
-        flash_attn_kvpacked_func,
-        flash_attn_varlen_kvpacked_func,
-        flash_attn_varlen_qkvpacked_func,
-    )
-except ImportError:
-    from flash_attn.flash_attn_interface import (
-        flash_attn_unpadded_kvpacked_func as flash_attn_varlen_kvpacked_func,
-    )
-    from flash_attn.flash_attn_interface import (
-        flash_attn_unpadded_qkvpacked_func as flash_attn_varlen_qkvpacked_func,
-    )
+LOG = logging.getLogger("axolotl.monkeypatch.mistral")
 
 
-LOG = logging.getLogger("axolotl")
-
-
-def replace_llama_attn_with_flash_attn(
+def replace_mistral_attn_with_flash_attn(
     packed: Optional[bool] = False,
-    cross_entropy: Optional[bool] = False,
-    rms_norm: Optional[bool] = False,
 ):
-    transformers.models.llama.modeling_llama.LlamaModel._prepare_decoder_attention_mask = (  # pylint: disable=protected-access
+    transformers.models.mistral.modeling_mistral.MistralModel._prepare_decoder_attention_mask = (  # pylint: disable=protected-access
         _prepare_decoder_attention_mask
     )
-    transformers.models.llama.modeling_llama.LlamaAttention.forward = flashattn_forward
+    transformers.models.mistral.modeling_mistral.MistralAttention.forward = (
+        flashattn_forward
+    )
     if packed:
-        transformers.models.llama.modeling_llama.LlamaDecoderLayer = LlamaDecoderLayer
-        transformers.models.llama.modeling_llama.LlamaModel.forward = (
-            llama_model_forward
+        transformers.models.mistral.modeling_mistral.MistralDecoderLayer = (
+            MistralDecoderLayer
         )
-
-    # skip only if explicitly disabled
-    if cross_entropy:
-        try:
-            from flash_attn.losses.cross_entropy import CrossEntropyLoss
-
-            LOG.info("patching with flash_attn.losses.cross_entropy")
-            transformers.models.llama.modeling_llama.CrossEntropyLoss = partial(
-                CrossEntropyLoss, inplace_backward=True
-            )
-        except ImportError:
-            LOG.info(
-                "optimized flash-attention CrossEntropyLoss not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=xentropy_cuda_lib&subdirectory=csrc/xentropy'`)"
-            )
-
-    # skip only if explicitly disabled
-    if rms_norm:
-        try:
-            from flash_attn.ops.rms_norm import RMSNorm
-
-            class LlamaRMSNorm(RMSNorm):
-                """Patched LLamaRMSNorm"""
-
-                def __init__(self, hidden_size, eps=1e-6):
-                    super().__init__(hidden_size, eps=eps)
-
-            LOG.info("patching with flash_attn.ops.rms_norm")
-            transformers.models.llama.modeling_llama.LlamaRMSNorm = LlamaRMSNorm
-        except ImportError:
-            LOG.info(
-                "optimized flash-attention RMSNorm not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=dropout_layer_norm&subdirectory=csrc/layer_norm'`)"
-            )
+        transformers.models.mistral.modeling_mistral.MistralModel.forward = (
+            mistral_model_forward
+        )
 
 
 # Disable the transformation of the attention mask in LlamaModel as the flash attention
@@ -94,6 +50,7 @@ def _prepare_decoder_attention_mask(
     input_shape,
     inputs_embeds,
     past_key_values_length,
+    sliding_window,
 ):  # pylint: disable=unused-argument
     # [bsz, seq_len]
     return attention_mask
@@ -103,53 +60,18 @@ def flashattn_forward(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
     past_key_value: Optional[Tuple[torch.Tensor]] = None,
     output_attentions: bool = False,
     use_cache: bool = False,
-    padding_mask: Optional[torch.LongTensor] = None,  # pylint: disable=unused-argument
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-    """Input shape: Batch x Time x Channel
-
-    attention_mask: [bsz, q_len]
-    """
-    # pylint: disable=duplicate-code
     bsz, q_len, _ = hidden_states.size()
 
-    if not hasattr(self, "pretraining_tp"):
-        self.pretraining_tp = 1
-
-    if self.pretraining_tp > 1:
-        key_value_slicing = (
-            self.num_key_value_heads * self.head_dim
-        ) // self.pretraining_tp
-        query_slices = self.q_proj.weight.split(
-            (self.num_heads * self.head_dim) // self.pretraining_tp, dim=0
-        )
-        key_slices = self.k_proj.weight.split(key_value_slicing, dim=0)
-        value_slices = self.v_proj.weight.split(key_value_slicing, dim=0)
-
-        query_states = [
-            F.linear(hidden_states, query_slices[i]) for i in range(self.pretraining_tp)
-        ]
-        query_states = torch.cat(query_states, dim=-1)
-
-        key_states = [
-            F.linear(hidden_states, key_slices[i]) for i in range(self.pretraining_tp)
-        ]
-        key_states = torch.cat(key_states, dim=-1)
-
-        value_states = [
-            F.linear(hidden_states, value_slices[i]) for i in range(self.pretraining_tp)
-        ]
-        value_states = torch.cat(value_states, dim=-1)
-
-    else:
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+    query_states = self.q_proj(hidden_states)
+    key_states = self.k_proj(hidden_states)
+    value_states = self.v_proj(hidden_states)
 
     query_states = query_states.view(
         bsz, q_len, self.num_heads, self.head_dim
@@ -160,18 +82,14 @@ def flashattn_forward(
     value_states = value_states.view(
         bsz, q_len, self.num_key_value_heads, self.head_dim
     ).transpose(1, 2)
-    # [bsz, q_len, nh, hd]
-    # [bsz, nh, q_len, hd]
 
     kv_seq_len = key_states.shape[-2]
     if past_key_value is not None:
         kv_seq_len += past_key_value[0].shape[-2]
-
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
     query_states, key_states = apply_rotary_pos_emb(
         query_states, key_states, cos, sin, position_ids
     )
-    # [bsz, nh, t, hd]
 
     if past_key_value is not None:
         # reuse k, v, self_attention
@@ -183,15 +101,6 @@ def flashattn_forward(
     # repeat k/v heads if n_kv_heads < n_heads
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
-
-    if output_attentions:
-        warnings.warn(
-            "Output attentions is not supported for patched `LlamaAttention`, returning `None` instead."
-        )
-
-    #
-    # flash-attn v2 start
-    #
 
     if self.training:
         # during training q,k,v always have same seqlen
@@ -293,23 +202,12 @@ def flashattn_forward(
         )
     attn_output = rearrange(attn_output, "b s h d -> b s (h d)")
 
-    #
-    # flash-attn v2 end
-    #
+    attn_output = self.o_proj(attn_output)
 
-    if self.pretraining_tp > 1:
-        attn_output = attn_output.split(self.hidden_size // self.pretraining_tp, dim=2)
-        o_proj_slices = self.o_proj.weight.split(
-            self.hidden_size // self.pretraining_tp, dim=1
-        )
-        attn_output = sum(
-            F.linear(attn_output[i], o_proj_slices[i])
-            for i in range(self.pretraining_tp)
-        )
-    else:
-        attn_output = self.o_proj(attn_output)
+    if not output_attentions:
+        attn_weights = None
 
-    return attn_output, None, past_key_value
+    return attn_output, attn_weights, past_key_value
 
 
 # based on https://github.com/Dao-AILab/flash-attention/blob/364a5b/tests/test_flash_attn.py#L38
@@ -411,7 +309,7 @@ def generate_qkv(
     )
 
 
-def llama_model_forward(
+def mistral_model_forward(
     self,
     input_ids: torch.LongTensor = None,
     attention_mask: Optional[torch.Tensor] = None,
@@ -485,19 +383,13 @@ def llama_model_forward(
             dtype=torch.bool,
             device=inputs_embeds.device,
         )
-        padding_mask = None
-    else:
-        if 0 in attention_mask:
-            padding_mask = attention_mask
-        else:
-            padding_mask = None
-
     attention_mask = (
         self._prepare_decoder_attention_mask(  # pylint: disable=protected-access
             attention_mask,
             (batch_size, seq_length),
             inputs_embeds,
             past_key_values_length,
+            sliding_window=self.config.sliding_window,
         )
     )
 
@@ -526,9 +418,7 @@ def llama_model_forward(
             def create_custom_forward(module):
                 def custom_forward(*inputs):
                     # None for past_key_value
-                    return module(
-                        *inputs,
-                    )
+                    return module(*inputs)
 
                 return custom_forward
 
@@ -540,7 +430,6 @@ def llama_model_forward(
                 past_key_value,
                 output_attentions,
                 None,
-                padding_mask,
                 cu_seqlens,
                 max_seqlen,
             )
@@ -552,7 +441,6 @@ def llama_model_forward(
                 past_key_value=past_key_value,
                 output_attentions=output_attentions,
                 use_cache=use_cache,
-                padding_mask=padding_mask,
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
@@ -586,9 +474,9 @@ def llama_model_forward(
     )
 
 
-class LlamaDecoderLayer(OriginalLlamaDecoderLayer):
+class MistralDecoderLayer(OriginalMistralDecoderLayer):
     """
-    patched version of LlamaDecoderLayer to pass through the precalculated cu_seqlens
+    patched version of MistralDecoderLayer to pass through the precalculated cu_seqlens
     """
 
     def forward(
@@ -599,7 +487,6 @@ class LlamaDecoderLayer(OriginalLlamaDecoderLayer):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
-        padding_mask: Optional[torch.LongTensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen: Optional[torch.Tensor] = None,
     ) -> Tuple[
@@ -632,7 +519,6 @@ class LlamaDecoderLayer(OriginalLlamaDecoderLayer):
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
-            padding_mask=padding_mask,
             cu_seqlens=cu_seqlens,
             max_seqlen=max_seqlen,
         )

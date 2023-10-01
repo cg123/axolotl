@@ -28,9 +28,9 @@ from transformers.trainer_pt_utils import SequentialDistributedSampler
 
 from axolotl.monkeypatch.relora import ReLoRACallback, ReLoRAScheduler
 from axolotl.utils.callbacks import (
+    EvalFirstStepCallback,
     GPUStatsCallback,
     SaveBetterTransformerModelCallback,
-    SavePeftModelCallback,
     SetOffsetCallback,
     bench_eval_callback_factory,
     log_prediction_callback_factory,
@@ -398,23 +398,36 @@ def disable_datasets_caching():
         set_caching_enabled(True)
 
 
-def process_datasets_for_packing(cfg, train_dataset, eval_dataset):
+def process_datasets_for_packing(cfg, train_dataset, eval_dataset, tokenizer):
     drop_long = partial(drop_long_seq, sequence_len=cfg.sequence_len)
     with zero_first(is_main_process()):
-        train_dataset = train_dataset.filter(drop_long, num_proc=os.cpu_count())
+        train_dataset = train_dataset.filter(drop_long, num_proc=cfg.dataset_processes)
         if eval_dataset:
-            eval_dataset = eval_dataset.filter(drop_long, num_proc=os.cpu_count())
+            eval_dataset = eval_dataset.filter(
+                drop_long, num_proc=cfg.dataset_processes
+            )
 
         if cfg.group_by_length:
-            train_dataset = train_dataset.map(add_length, num_proc=os.cpu_count())
+            train_dataset = train_dataset.map(
+                add_length, num_proc=cfg.dataset_processes
+            )
 
         if cfg.sample_packing:
-            train_dataset = train_dataset.map(add_position_ids, num_proc=os.cpu_count())
+            train_dataset = train_dataset.map(
+                add_position_ids, num_proc=cfg.dataset_processes
+            )
             if cfg.eval_sample_packing is not False:
                 if eval_dataset:
                     eval_dataset = eval_dataset.map(
-                        add_position_ids, num_proc=os.cpu_count()
+                        add_position_ids, num_proc=cfg.dataset_processes
                     )
+
+        # Phi doesn't want the attention_mask feature when training
+        if "CodeGenTokenizer" in tokenizer.__class__.__name__:
+            train_dataset = train_dataset.remove_columns("attention_mask")
+            if eval_dataset:
+                eval_dataset = eval_dataset.remove_columns("attention_mask")
+
     return train_dataset, eval_dataset
 
 
@@ -598,26 +611,19 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
             "sample_packing_efficiency"
         ] = cfg.sample_packing_eff_est
 
-    if cfg.eval_steps and cfg.evaluation_strategy:
-        # assume if the user set both, they know what they're doing
-        training_arguments_kwargs["evaluation_strategy"] = cfg.evaluation_strategy
+    if cfg.eval_steps:
+        training_arguments_kwargs["evaluation_strategy"] = "steps"
         training_arguments_kwargs["eval_steps"] = cfg.eval_steps
+    elif cfg.evaluation_strategy:
+        training_arguments_kwargs["evaluation_strategy"] = cfg.evaluation_strategy
     elif cfg.val_set_size == 0:
         # no eval set, so don't eval
         training_arguments_kwargs["evaluation_strategy"] = "no"
-    elif cfg.evaluation_strategy and cfg.evaluation_strategy in ["epoch", "no"]:
-        # if explicitly set for epoch, just set, and eval steps don't matter
-        training_arguments_kwargs["evaluation_strategy"] = cfg.evaluation_strategy
-    elif cfg.eval_steps:
-        # steps isn't used w/ epochs
-        training_arguments_kwargs["evaluation_strategy"] = "steps"
-        training_arguments_kwargs["eval_steps"] = cfg.eval_steps
     else:
         # we have an eval set, but no steps defined, default to use epoch
         training_arguments_kwargs["evaluation_strategy"] = "epoch"
 
     if cfg.save_steps:
-        # save_steps implies save_strategy of steps
         training_arguments_kwargs["save_strategy"] = "steps"
         training_arguments_kwargs["save_steps"] = cfg.save_steps
     elif cfg.save_strategy:
@@ -676,6 +682,7 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
             (cfg.load_best_model_at_end is not False or cfg.early_stopping_patience)
             and cfg.val_set_size > 0
             and cfg.save_steps
+            and cfg.eval_steps
             and cfg.save_steps % cfg.eval_steps == 0
         )
         or False,
@@ -705,15 +712,10 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
 
     callbacks = []
     callbacks.append(GPUStatsCallback(cfg))
+    callbacks.append(EvalFirstStepCallback)
 
     if cfg.relora_steps:
         callbacks.append(ReLoRACallback(cfg))
-
-    if cfg.local_rank == 0 and cfg.adapter in [
-        "lora",
-        "qlora",
-    ]:  # only save in rank 0
-        callbacks.append(SavePeftModelCallback)
 
     if cfg.update_offset and cfg.max_packed_sequence_len:
         callbacks.append(

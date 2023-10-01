@@ -20,7 +20,7 @@ class ConstantLengthDataset(IterableDataset):
     """
     Iterable dataset that returns constant length chunks of tokens from stream of text files.
         Args:
-            tokenizer (Tokenizer): The processor used for proccessing the data.
+            tokenizer (Tokenizer): The processor used for processing the data.
             dataset (dataset.Dataset): Dataset with text files.
             seq_length (int): Length of token sequences to return.
     """

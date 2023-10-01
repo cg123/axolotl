@@ -351,3 +351,217 @@ class ValidationTest(unittest.TestCase):
         regex_exp = r".*set only one of max_packed_sequence_len \(deprecated soon\) or sample_packing.*"
         with pytest.raises(ValueError, match=regex_exp):
             validate_config(cfg)
+
+    def test_merge_lora_no_bf16_fail(self):
+        """
+        This is assumed to be run on a CPU machine, so bf16 is not supported.
+        """
+
+        cfg = DictDefault(
+            {
+                "bf16": True,
+            }
+        )
+
+        with pytest.raises(ValueError, match=r".*AMP is not supported on this GPU*"):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "bf16": True,
+                "merge_lora": True,
+            }
+        )
+
+        validate_config(cfg)
+
+    def test_sharegpt_deprecation(self):
+        cfg = DictDefault(
+            {"datasets": [{"path": "lorem/ipsum", "type": "sharegpt:chat"}]}
+        )
+        with self._caplog.at_level(logging.WARNING):
+            validate_config(cfg)
+            assert any(
+                "`type: sharegpt:chat` will soon be deprecated." in record.message
+                for record in self._caplog.records
+            )
+        assert cfg.datasets[0].type == "sharegpt"
+
+        cfg = DictDefault(
+            {"datasets": [{"path": "lorem/ipsum", "type": "sharegpt_simple:load_role"}]}
+        )
+        with self._caplog.at_level(logging.WARNING):
+            validate_config(cfg)
+            assert any(
+                "`type: sharegpt_simple` will soon be deprecated." in record.message
+                for record in self._caplog.records
+            )
+        assert cfg.datasets[0].type == "sharegpt:load_role"
+
+    def test_no_conflict_save_strategy(self):
+        cfg = DictDefault(
+            {
+                "save_strategy": "epoch",
+                "save_steps": 10,
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match=r".*save_strategy and save_steps mismatch.*"
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "save_strategy": "no",
+                "save_steps": 10,
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match=r".*save_strategy and save_steps mismatch.*"
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "save_strategy": "steps",
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "save_strategy": "steps",
+                "save_steps": 10,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "save_steps": 10,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "save_strategy": "no",
+            }
+        )
+
+        validate_config(cfg)
+
+    def test_no_conflict_eval_strategy(self):
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "epoch",
+                "eval_steps": 10,
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match=r".*evaluation_strategy and eval_steps mismatch.*"
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "no",
+                "eval_steps": 10,
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match=r".*evaluation_strategy and eval_steps mismatch.*"
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "steps",
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "steps",
+                "eval_steps": 10,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "eval_steps": 10,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "no",
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "epoch",
+                "val_set_size": 0,
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r".*eval_steps and evaluation_strategy are not supported with val_set_size == 0.*",
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "eval_steps": 10,
+                "val_set_size": 0,
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r".*eval_steps and evaluation_strategy are not supported with val_set_size == 0.*",
+        ):
+            validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "val_set_size": 0,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "eval_steps": 10,
+                "val_set_size": 0.01,
+            }
+        )
+
+        validate_config(cfg)
+
+        cfg = DictDefault(
+            {
+                "evaluation_strategy": "epoch",
+                "val_set_size": 0.01,
+            }
+        )
+
+        validate_config(cfg)

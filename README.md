@@ -31,6 +31,7 @@ Features:
   - [How to Use Custom Pretokenized Dataset](#how-to-use-your-custom-pretokenized-dataset)
 - [Config](#config)
   - [Train](#train)
+  - [Training w/ Deepspeed](#training-with-deepspeed)
   - [Inference](#inference)
   - [Merge LORA to Base](#merge-lora-to-base)
 - [Common Errors](#common-errors-)
@@ -86,7 +87,7 @@ git clone https://github.com/OpenAccess-AI-Collective/axolotl
 cd axolotl
 
 pip3 install packaging
-pip3 install -e .[flash-attn]
+pip3 install -e '.[flash-attn,deepspeed]'
 pip3 install -U git+https://github.com/huggingface/peft.git
 
 # finetune lora
@@ -121,8 +122,13 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   3. Install axolotl along with python dependencies
         ```bash
         pip3 install packaging
-        pip3 install -e .[flash-attn]
+        pip3 install -e '.[flash-attn,deepspeed]'
         ```
+  4. (Optional) Login to Huggingface to use gated models/datasets.
+        ```bash
+        huggingface-cli login
+        ```
+        Get the token at huggingface.co/settings/tokens
 
 - LambdaLabs
   <details>
@@ -157,7 +163,7 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   cd axolotl
 
   pip3 install packaging
-  pip3 install -e .[flash-attn]
+  pip3 install -e '.[flash-attn,deepspeed]'
   pip3 install protobuf==3.20.3
   pip3 install -U --ignore-installed requests Pillow psutil scipy
   ```
@@ -179,7 +185,7 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"instruction": "...", "input": "...", "output": "..."}
   ```
-- `sharegpt:chat`: conversations where `from` is `human`/`gpt`
+- `sharegpt`: conversations where `from` is `human`/`gpt`
   ```json
   {"conversations": [{"from": "...", "value": "..."}]}
   ```
@@ -244,6 +250,10 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"article": "...", "question": "...", "answer": "..."}
   ```
+- `context_qa.load_v2`: in context question answering (alternate)
+  ```json
+  {"context": "...", "question": "...", "answer": "..."}
+  ```
 - `context_qa.load_404`: in context question answering from an article, with default response for no answer from context
   ```json
   {"article": "...", "unanswerable_question": "..."}
@@ -268,11 +278,11 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"prompt": "...", "generation": "..."}
   ```
-- `sharegpt_simple.load_role`: conversations where `role` is used instead of `from`
+- `sharegpt.load_role`: conversations where `role` is used instead of `from`
   ```json
   {"conversations": [{"role": "...", "value": "..."}]}
   ```
-- `sharegpt_simple.load_guanaco`: conversations where `from` is `prompter`/`assistant` instead of default sharegpt
+- `sharegpt.load_guanaco`: conversations where `from` is `prompter`/`assistant` instead of default sharegpt
   ```json
   {"conversations": [{"from": "...", "value": "..."}]}
   ```
@@ -307,7 +317,7 @@ Using file:
 #### How to use your custom pretokenized dataset
 
 - Do not pass a `type:`
-- Dataset must contain `input_ids`, `attention_mask`, `labels` in columns
+- Columns in Dataset must be exactly `input_ids`, `attention_mask`, `labels`
 
 
 ### Config
@@ -350,6 +360,12 @@ See [examples](examples) for quick start. It is recommended to duplicate and mod
     - path: data.jsonl # or json
       ds_type: json # see other options below
       type: alpaca
+
+  # dataset with splits, but no train split
+  dataset:
+    - path: knowrohit07/know_sql
+      type: context_qa.load_v2
+      train_on_split: validation
   ```
 
 - loading
@@ -407,6 +423,11 @@ tokenizer_legacy:
 # this is reported to improve training speed on some models
 resize_token_embeddings_to_32x:
 
+# used to identify which the model is based on
+is_falcon_derived_model:
+is_llama_derived_model:
+is_mistral_derived_model:
+
 # whether you are training a 4-bit GPTQ quantized model
 gptq: true
 gptq_groupsize: 128 # group size
@@ -438,6 +459,7 @@ datasets:
     data_files: # Optional[str] path to source data files
     shards: # Optional[int] number of shards to split data into
     name: # Optional[str] name of dataset configuration to load
+    conversation:  # Optional[str] fastchat conversation type, only used with type: sharegpt
 
   # custom user prompt
   - path: repo
@@ -465,6 +487,9 @@ datasets:
 dataset_prepared_path: data/last_run_prepared
 # push prepared dataset to hub
 push_dataset_to_hub: # repo path
+# The maximum number of processes to use while preprocessing your input dataset. This defaults to `os.cpu_count()`
+# if not set.
+dataset_processes: # defaults to os.cpu_count() if not set
 # push checkpoints to hub
 hub_model_id: # repo path to push finetuned model
 # how to push checkpoints to hub
@@ -492,6 +517,8 @@ pad_to_sequence_len:
 max_packed_sequence_len: 1024
 # use efficient multi-packing with block diagonal attention and per sequence position_ids. Recommend set to 'true'
 sample_packing:
+# set to 'false' if getting errors during eval with sample_packing on.
+eval_sample_packing:
 # you can set these packing optimizations AFTER starting a training at least once.
 # The trainer will provide recommended values for these values.
 sample_packing_eff_est:
@@ -628,6 +655,8 @@ flash_optimum:
 xformers_attention:
 # whether to use flash attention patch https://github.com/Dao-AILab/flash-attention:
 flash_attention:
+flash_attn_cross_entropy:  # Whether to use flash-attention cross entropy implementation - advanced use only
+flash_attn_rms_norm:  # Whether to use flash-attention rms norm implementation - advanced use only
 # whether to use scaled-dot-product attention
 # https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
 sdp_attention:
@@ -715,11 +744,6 @@ fsdp_config:
   fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
 ```
 
-- llama Deepspeed
-```yaml
-deepspeed: deepspeed/zero3.json
-```
-
 ##### Weights & Biases Logging
 
 - wandb options
@@ -730,6 +754,24 @@ wandb_entity:
 wandb_watch:
 wandb_run_id:
 wandb_log_model:
+```
+
+### Training with Deepspeed
+
+Deepspeed is an optimization suite for multi-gpu systems allowing you to train much larger models than you
+might typically be able to fit into your GPU's VRAM. More information about the various optimization types
+for deepspeed is available at https://huggingface.co/docs/accelerate/main/en/usage_guides/deepspeed#what-is-integrated
+
+We provide several default deepspeed JSON configurations for ZeRO stage 1, 2, and 3.
+
+```shell
+accelerate launch -m axolotl.cli.train examples/llama-2/config.py --deepspeed deepspeed/zero1.json
+```
+
+or
+
+```yaml
+deepspeed: deepspeed/zero1.json
 ```
 
 ### Inference

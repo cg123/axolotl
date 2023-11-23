@@ -56,10 +56,12 @@ def neft_forward(self, inputs: torch.Tensor):
 
 
 def pretrain_hook(cfg, trainer):
-    if cfg.noisy_embedding_alpha:
-        trainer.model = patch_neft(cfg.noisy_embedding_alpha, trainer.model)
+    # if cfg.noisy_embedding_alpha:
+    #     trainer.model = patch_neft(cfg.noisy_embedding_alpha, trainer.model)
+    return
 
 
 def post_train_hook(cfg, trainer):
-    if cfg.noisy_embedding_alpha:
-        unpatch_neft(trainer.model)
+    # if cfg.noisy_embedding_alpha:
+    #     unpatch_neft(trainer.model)
+    return

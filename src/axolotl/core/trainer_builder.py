@@ -667,6 +667,7 @@ class HFCausalTrainerBuilder(TrainerBuilderBase):
         ] = self.cfg.micro_batch_size
         training_arguments_kwargs["relora_steps"] = self.cfg.relora_steps
         training_arguments_kwargs["relora_warmup_steps"] = self.cfg.relora_warmup_steps
+        training_arguments_kwargs["neftune_noise_alpha"] = self.cfg.noisy_embedding_alpha
         training_arguments_kwargs = self.hook_pre_create_training_args(
             training_arguments_kwargs
         )

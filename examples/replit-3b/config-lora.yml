@@ -1,5 +1,4 @@
 base_model: replit/replit-code-v1-3b
-base_model_config: replit/replit-code-v1-3b
 trust_remote_code: true
 load_in_8bit: false
 datasets:
@@ -27,7 +26,7 @@ wandb_log_model:
 output_dir: ./lora-replit
 batch_size: 8
 micro_batch_size: 1
-num_epochs: 3
+num_epochs: 4
 optimizer:
 torchdistx_path:
 lr_scheduler:

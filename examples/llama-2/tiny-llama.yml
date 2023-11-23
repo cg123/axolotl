@@ -1,5 +1,4 @@
-base_model: PY007/TinyLlama-1.1B-step-50K-105b
-base_model_config: PY007/TinyLlama-1.1B-step-50K-105b
+base_model: PY007/TinyLlama-1.1B-intermediate-step-715k-1.5T
 
 model_type: LlamaForCausalLM
 tokenizer_type: LlamaTokenizer
@@ -13,7 +12,7 @@ datasets:
   - path: mhenrichsen/alpaca_2k_test
     type: alpaca
 dataset_prepared_path:
-val_set_size: 0.01
+val_set_size: 0.05
 output_dir: ./lora-out
 
 sequence_len: 4096
@@ -35,7 +34,7 @@ wandb_log_model:
 
 gradient_accumulation_steps: 4
 micro_batch_size: 2
-num_epochs: 3
+num_epochs: 4
 optimizer: adamw_bnb_8bit
 lr_scheduler: cosine
 learning_rate: 0.0002
@@ -55,7 +54,7 @@ xformers_attention:
 flash_attention: true
 
 warmup_steps: 10
-eval_steps: 20
+eval_steps: 0.05
 eval_table_size:
 save_steps:
 debug:

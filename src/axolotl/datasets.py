@@ -1,7 +1,7 @@
 """Module containing Dataset functionality"""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import torch
 from datasets import IterableDataset

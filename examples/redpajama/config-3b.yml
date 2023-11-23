@@ -1,5 +1,4 @@
 base_model: togethercomputer/RedPajama-INCITE-Chat-3B-v1
-base_model_config: togethercomputer/RedPajama-INCITE-Chat-3B-v1
 model_type: GPTNeoXForCausalLM
 tokenizer_type: AutoTokenizer
 trust_remote_code:
@@ -28,7 +27,7 @@ wandb_log_model:
 output_dir: ./redpajama-alpaca-3b
 batch_size: 4
 micro_batch_size: 1
-num_epochs: 3
+num_epochs: 4
 optimizer: adamw_bnb_8bit
 torchdistx_path:
 lr_scheduler: cosine

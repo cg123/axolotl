@@ -1,6 +1,5 @@
 """Prepare and train a model on a dataset. Can also infer from a model or merge lora"""
 
-import logging
 import os
 import signal
 import sys
@@ -10,11 +9,14 @@ from typing import Optional
 
 import torch
 import transformers.modelcard
+from accelerate.logging import get_logger
 from datasets import Dataset
 from optimum.bettertransformer import BetterTransformer
+from transformers.deepspeed import is_deepspeed_zero3_enabled
 
 from axolotl.common.cli import TrainerCliArgs
 from axolotl.logging_config import configure_logging
+from axolotl.monkeypatch import neft_embeddings
 from axolotl.utils.dict import DictDefault
 from axolotl.utils.models import load_model, load_tokenizer
 from axolotl.utils.trainer import setup_trainer
@@ -24,7 +26,7 @@ src_dir = os.path.join(project_root, "src")
 sys.path.insert(0, src_dir)
 
 configure_logging()
-LOG = logging.getLogger("axolotl.train")
+LOG = get_logger("axolotl.train")
 
 
 @dataclass
@@ -39,13 +41,13 @@ class TrainDatasetMeta:
 
 
 def train(
-    *,
-    cfg: DictDefault,
-    cli_args: TrainerCliArgs,
-    dataset_meta: TrainDatasetMeta,
+    *, cfg: DictDefault, cli_args: TrainerCliArgs, dataset_meta: TrainDatasetMeta
 ):
     # load the tokenizer first
-    LOG.info(f"loading tokenizer... {cfg.tokenizer_config or cfg.base_model_config}")
+    LOG.debug(
+        f"loading tokenizer... {cfg.tokenizer_config or cfg.base_model_config}",
+        main_process_only=True,
+    )
     tokenizer = load_tokenizer(cfg)
 
     train_dataset = dataset_meta.train_dataset
@@ -53,7 +55,10 @@ def train(
     total_num_steps = dataset_meta.total_num_steps
 
     # Load the model and tokenizer
-    LOG.info("loading model and (optionally) peft_config...")
+    msg = "loading model"
+    if cfg.adapter:
+        msg += " and peft_config..."
+    LOG.debug(msg)
     model, peft_config = load_model(cfg, tokenizer, inference=cli_args.inference)
 
     safe_serialization = cfg.save_safetensors is True
@@ -109,6 +114,7 @@ def train(
     if cfg.group_by_length:
         LOG.info("hang tight... sorting dataset for group_by_length")
 
+    pretrain_hooks(cfg, trainer)
     if cfg.flash_optimum:
         with torch.backends.cuda.sdp_kernel(
             enable_flash=True, enable_math=True, enable_mem_efficient=True
@@ -116,8 +122,14 @@ def train(
             trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     else:
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    post_train_hooks(cfg, trainer)
 
     LOG.info(f"Training Completed!!! Saving pre-trained model to {cfg.output_dir}")
+
+    # post training
+    for name, module in model.named_modules():
+        if hasattr(module, "_post_training"):
+            module._post_training(model, name)  # pylint: disable=protected-access
 
     if trainer.is_fsdp_enabled:
         trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
@@ -134,6 +146,22 @@ def train(
     # only save on rank 0, otherwise it corrupts output on multi-GPU when multiple processes attempt to write the same file
     if cfg.fsdp:
         trainer.save_model(cfg.output_dir)
+    elif cfg.deepspeed and is_deepspeed_zero3_enabled():
+        # Copied over from: https://github.com/huggingface/accelerate/blob/5ae611118057232f441055f7ef9ba0b0f2b8d533/docs/source/usage_guides/deepspeed.md#saving-and-loading
+        trainer.accelerator.wait_for_everyone()
+        unwrapped_model = trainer.accelerator.unwrap_model(trainer.model_wrapped)
+
+        # Saves the whole/unpartitioned fp16 model when in ZeRO Stage-3 to the output directory if
+        # `stage3_gather_16bit_weights_on_model_save` is True in DeepSpeed Config file or
+        # `zero3_save_16bit_model` is True in DeepSpeed Plugin.
+        # For Zero Stages 1 and 2, models are saved as usual in the output directory.
+        # The model name saved is `pytorch_model.bin`
+        unwrapped_model.save_pretrained(
+            cfg.output_dir,
+            is_main_process=trainer.accelerator.is_main_process,
+            save_function=trainer.accelerator.save,
+            state_dict=trainer.accelerator.get_state_dict(trainer.model_wrapped),
+        )
     elif cfg.local_rank == 0:
         if cfg.flash_optimum:
             model = BetterTransformer.reverse(model)
@@ -144,3 +172,23 @@ def train(
         trainer.create_model_card(model_name=cfg.output_dir.lstrip("./"))
 
     return model, tokenizer
+
+
+def pretrain_hooks(cfg, trainer):
+    """
+    Run hooks right before kicking off the training
+    :param cfg:
+    :param trainer:
+    :return:
+    """
+    neft_embeddings.pretrain_hook(cfg, trainer)
+
+
+def post_train_hooks(cfg, trainer):
+    """
+    Run hooks right after training completes
+    :param cfg:
+    :param trainer:
+    :return:
+    """
+    neft_embeddings.post_train_hook(cfg, trainer)

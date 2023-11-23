@@ -6,8 +6,10 @@ import os
 import random
 import sys
 from pathlib import Path
+from threading import Thread
 from typing import Any, Dict, List, Optional, Union
 
+import gradio as gr
 import torch
 import yaml
 
@@ -16,7 +18,7 @@ from accelerate.commands.config import config_args
 from art import text2art
 from huggingface_hub import HfApi
 from huggingface_hub.utils import LocalTokenNotFoundError
-from transformers import GenerationConfig, TextStreamer
+from transformers import GenerationConfig, TextIteratorStreamer, TextStreamer
 
 from axolotl.common.cli import TrainerCliArgs, load_model_and_tokenizer
 from axolotl.logging_config import configure_logging
@@ -44,7 +46,7 @@ def print_axolotl_text_art(suffix=None):
     ascii_text = "  axolotl"
     if suffix:
         ascii_text += f"  x  {suffix}"
-    ascii_art = text2art(" axolotl", font=font)
+    ascii_art = text2art(ascii_text, font=font)
 
     if is_main_process():
         print(ascii_art)
@@ -153,6 +155,91 @@ def do_inference(
         print(tokenizer.decode(generated["sequences"].cpu().tolist()[0]))
 
 
+def do_inference_gradio(
+    *,
+    cfg: DictDefault,
+    cli_args: TrainerCliArgs,
+):
+    model, tokenizer = load_model_and_tokenizer(cfg=cfg, cli_args=cli_args)
+    prompter = cli_args.prompter
+    default_tokens = {"unk_token": "<unk>", "bos_token": "<s>", "eos_token": "</s>"}
+
+    for token, symbol in default_tokens.items():
+        # If the token isn't already specified in the config, add it
+        if not (cfg.special_tokens and token in cfg.special_tokens):
+            tokenizer.add_special_tokens({token: symbol})
+
+    prompter_module = None
+    if prompter:
+        prompter_module = getattr(
+            importlib.import_module("axolotl.prompters"), prompter
+        )
+
+    if cfg.landmark_attention:
+        from axolotl.monkeypatch.llama_landmark_attn import set_model_mem_id
+
+        set_model_mem_id(model, tokenizer)
+        model.set_mem_cache_args(
+            max_seq_len=255, mem_freq=50, top_k=5, max_cache_size=None
+        )
+
+    model = model.to(cfg.device)
+
+    def generate(instruction):
+        if not instruction:
+            return
+        if prompter_module:
+            # pylint: disable=stop-iteration-return
+            prompt: str = next(
+                prompter_module().build_prompt(instruction=instruction.strip("\n"))
+            )
+        else:
+            prompt = instruction.strip()
+        batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+
+        model.eval()
+        with torch.no_grad():
+            generation_config = GenerationConfig(
+                repetition_penalty=1.1,
+                max_new_tokens=1024,
+                temperature=0.9,
+                top_p=0.95,
+                top_k=40,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.pad_token_id,
+                do_sample=True,
+                use_cache=True,
+                return_dict_in_generate=True,
+                output_attentions=False,
+                output_hidden_states=False,
+                output_scores=False,
+            )
+            streamer = TextIteratorStreamer(tokenizer)
+            generation_kwargs = {
+                "inputs": batch["input_ids"].to(cfg.device),
+                "generation_config": generation_config,
+                "streamer": streamer,
+            }
+
+            thread = Thread(target=model.generate, kwargs=generation_kwargs)
+            thread.start()
+
+            all_text = ""
+
+            for new_text in streamer:
+                all_text += new_text
+                yield all_text
+
+    demo = gr.Interface(
+        fn=generate,
+        inputs="textbox",
+        outputs="text",
+        title=cfg.get("gradio_title", "Axolotl Gradio Interface"),
+    )
+    demo.queue().launch(show_api=False, share=True)
+
+
 def choose_config(path: Path):
     yaml_files = list(path.glob("*.yml"))
 
@@ -194,6 +281,7 @@ def load_cfg(config: Path = Path("examples/"), **kwargs):
     # load the config from the yaml file
     with open(config, encoding="utf-8") as file:
         cfg: DictDefault = DictDefault(yaml.safe_load(file))
+    cfg.axolotl_config_path = config
     # if there are any options passed in the cli, if it is something that seems valid from the yaml,
     # then overwrite the value
     cfg_keys = cfg.keys()
@@ -221,7 +309,9 @@ def load_datasets(
 ) -> TrainDatasetMeta:
     tokenizer = load_tokenizer(cfg)
 
-    train_dataset, eval_dataset, total_num_steps = prepare_dataset(cfg, tokenizer)
+    train_dataset, eval_dataset, total_num_steps = prepare_dataset(
+        cfg, tokenizer
+    )
 
     if cli_args.debug or cfg.debug:
         LOG.info("check_dataset_labels...")

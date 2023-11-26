@@ -77,6 +77,7 @@ Features:
 | XGen     | ✅         | ❓    | ✅     | ❓             | ❓                 | ❓          | ✅            |
 | phi      | ✅         | ✅    | ✅     | ❓             | ❓                 | ❓          | ❓            |
 | RWKV     | ✅         | ❓    | ❓     | ❓             | ❓                 | ❓          | ❓            |
+| Qwen     | ✅         | ✅    | ✅     | ❓             | ❓                 | ❓          | ❓            |
 
 
 ## Quickstart ⚡
@@ -499,6 +500,7 @@ is_falcon_derived_model:
 is_llama_derived_model:
 # Please note that if you set this to true, `padding_side` will be set to "left" by default
 is_mistral_derived_model:
+is_qwen_derived_model:
 
 # optional overrides to the base model configuration
 model_config:
@@ -675,7 +677,8 @@ gradient_accumulation_steps: 1
 micro_batch_size: 2
 eval_batch_size:
 num_epochs: 4
-warmup_steps: 100
+warmup_steps: 100  # cannot use with warmup_ratio
+warmup_ratio: 0.05  # cannot use with warmup_steps
 learning_rate: 0.00003
 lr_quadratic_warmup:
 logging_steps:

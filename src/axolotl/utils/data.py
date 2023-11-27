@@ -231,6 +231,8 @@ def load_tokenized_prepared_datasets(
             # support for using a subset of the data
             if d.shards:
                 ds = ds.shuffle(seed=seed).shard(num_shards=d.shards, index=0)
+            if d.repeats:
+                ds = concatenate_datasets([ds] * int(d.repeats))
 
             parser = get_parser(d.type)
             ds_formatter = formatter
@@ -257,7 +259,7 @@ def load_tokenized_prepared_datasets(
             datasets.append(ds)
 
         LOG.info("merging and shuffling master dataset")
-        dataset = concatenate_datasets(datasets).shuffle(seed=seed)
+        dataset = concatenate_datasets(datasets).shuffle(seed=seed+1)
 
         if cfg.local_rank == 0 and cfg.dataset_prepared_path:
             LOG.info(f"Saving merged prepared dataset to disk... {prepared_ds_path}")

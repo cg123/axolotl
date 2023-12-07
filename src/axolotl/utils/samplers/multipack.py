@@ -130,6 +130,9 @@ class MultipackBatchSampler(BatchSampler):
         self.eff_total_used = 0
         self.eff_total_slots = 0
 
+        # last length sum to deduplicate length estimation logging
+        self._last_length_sum = None
+
     def set_epoch(self, epoch: int):
         self.epoch = epoch
 
@@ -175,10 +178,13 @@ class MultipackBatchSampler(BatchSampler):
         world_size = int(os.getenv("WORLD_SIZE", "1"))
         lengths_sum = np.sum(self.lengths)
         lengths_sum_per_device = lengths_sum // world_size
-        LOG.info(
-            f"packing_efficiency_estimate: {self.packing_efficiency_estimate} "
-            f"total_num_tokens per device: {lengths_sum_per_device}"
-        )
+
+        if lengths_sum != self._last_length_sum:
+            LOG.info(
+                f"packing_efficiency_estimate: {self.packing_efficiency_estimate} "
+                f"total_num_tokens per device: {lengths_sum_per_device}"
+            )
+            self._last_length_sum = lengths_sum
 
         # shave off 1% + 1 for dealing with variance in packing from random sampler to sampler
         return max(

@@ -11,7 +11,7 @@ from einops import rearrange
 from flash_attn import flash_attn_varlen_qkvpacked_func
 from transformers import Cache, DynamicCache
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
-from transformers.modeling_outputs import MoeModelOutputWithPast
+from transformers.modeling_outputs import MoEModelOutputWithPast
 from transformers.models.mixtral.modeling_mixtral import (
     MixtralFlashAttention2,
     apply_rotary_pos_emb,
@@ -198,7 +198,7 @@ def mixtral_model_forward(
     output_hidden_states: Optional[bool] = None,
     output_router_logits: Optional[bool] = None,
     return_dict: Optional[bool] = None,
-) -> Union[Tuple, MoeModelOutputWithPast]:
+) -> Union[Tuple, MoEModelOutputWithPast]:
     output_attentions = (
         output_attentions
         if output_attentions is not None
@@ -370,7 +370,7 @@ def mixtral_model_forward(
             if v is not None
         )
 
-    return MoeModelOutputWithPast(
+    return MoEModelOutputWithPast(
         last_hidden_state=hidden_states,
         past_key_values=next_cache,
         hidden_states=all_hidden_states,

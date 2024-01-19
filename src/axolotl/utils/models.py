@@ -645,7 +645,7 @@ def find_all_linear_names(model):
 def load_lora(model, cfg, inference=False):
     # type: (PreTrainedModel, DictDefault, bool) -> Tuple[PreTrainedModel, Optional[PeftConfig]]
 
-    from peft import LoraConfig, PeftModel, get_peft_model
+    from peft import LoraConfig, PeftModel, get_peft_model, LoftQConfig
 
     lora_target_modules = list(cfg.lora_target_modules or [])
 
@@ -653,6 +653,14 @@ def load_lora(model, cfg, inference=False):
         linear_names = find_all_linear_names(model)
         LOG.info(f"found linear modules: {repr(linear_names)}")
         lora_target_modules = list(set(lora_target_modules + linear_names))
+
+    loftq_config = None
+    if cfg.loftq_iters:
+        if not cfg.load_in_4bit and not cfg.load_in_8bit:
+            raise RuntimeError("LoftQ needs 4/8 bit")
+        loftq_config = LoftQConfig(
+            loftq_bits=4 if cfg.load_in_4bit else 8, loftq_iter=int(cfg.loftq_iters)
+        )
 
     lora_config = LoraConfig(
         r=cfg.lora_r,
@@ -663,6 +671,7 @@ def load_lora(model, cfg, inference=False):
         modules_to_save=cfg.lora_modules_to_save if cfg.lora_modules_to_save else None,
         bias="none",
         task_type="CAUSAL_LM",
+        loftq_config=loftq_config,
     )
 
     if cfg.lora_model_dir:

@@ -584,7 +584,7 @@ class HFCausalTrainerBuilder(TrainerBuilderBase):
                 "dataloader_prefetch_factor"
             ] = self.cfg.dataloader_prefetch_factor
 
-        if self.cfg.val_set_size == 0:
+        if self.cfg.val_set_size == 0 and not self.cfg.val_split_name:
             # no eval set, so don't eval
             training_arguments_kwargs["evaluation_strategy"] = "no"
         elif self.cfg.eval_steps:

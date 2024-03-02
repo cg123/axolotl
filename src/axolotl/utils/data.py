@@ -63,7 +63,7 @@ def prepare_dataset(cfg, tokenizer):
             train_dataset = train_dataset.map(
                 lambda e: {"labels": e["input_ids"]}, num_proc=32
             )
-        if "labels" in eval_dataset.column_names:
+        if "labels" not in eval_dataset.column_names:
             eval_dataset = eval_dataset.map(
                 lambda e: {"labels": e["input_ids"]}, num_proc=32
             )

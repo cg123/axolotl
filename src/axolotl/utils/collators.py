@@ -143,7 +143,7 @@ class BatchSamplerDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
                     if feature in item
                 ]
                 chunked_data[feature] = np.concatenate(arrays)
-            else:
+            elif feature in ["input_ids", "labels", "position_ids"]:
                 arrays = [
                     np.array(item[feature]) for item in features if feature in item
                 ]

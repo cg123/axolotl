@@ -515,13 +515,6 @@ def load_model(
             max_position_embeddings=model.config.max_position_embeddings,
         )
     
-
-    if cfg.patch_bitnet:
-        from axolotl.monkeypatch.bitlinear import patch_model_bitlinear
-
-        logging.info("patching with bitlinear")
-        patch_model_bitlinear(model)
-
     # make sure these are fp32 per Ramesh et al. (2021)
     for name, module in model.named_modules():
         if "norm" in name:

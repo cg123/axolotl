@@ -58,6 +58,15 @@ def prepare_dataset(cfg, tokenizer):
         train_dataset, eval_dataset = process_datasets_for_packing(
             cfg, train_dataset, eval_dataset, tokenizer
         )
+
+        if "labels" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda e: {"labels": e["input_ids"]}, num_proc=32
+            )
+        if "labels" in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda e: {"labels": e["input_ids"]}, num_proc=32
+            )
     if cfg.max_steps:
         total_num_steps = min(
             calculate_total_num_steps(cfg, train_dataset, tokenizer), cfg.max_steps
@@ -226,11 +235,13 @@ def load_tokenized_prepared_datasets(
                 raise ValueError("unhandled dataset load")
 
             if "train" in ds:
-                ds = ds["train"]
+                ds = concatenate_datasets([ds[split].map(lambda e: {"_split_name": split}, num_proc=32) for split in ds])
 
             # support for using a subset of the data
             if d.shards:
-                ds = ds.shuffle(seed=seed).shard(num_shards=d.shards, index=0)
+                if not cfg.dont_shuffle:
+                    ds = ds.shuffle(seed=seed)
+                ds = ds.shard(num_shards=d.shards, index=0)
             if d.repeats:
                 ds = concatenate_datasets([ds] * int(d.repeats))
 
@@ -245,21 +256,23 @@ def load_tokenized_prepared_datasets(
                 options=TokenizationOptions(eos_after_output=True),
             )
 
+            if not "input_ids" in ds.column_names:
+                ds = ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
+            
             if d.truncate:
                 slen = cfg.sequence_len
 
                 ds = ds.map(
-                    lambda e: snip(pipeline(e), slen),
+                    lambda e: snip(e, slen),
                     num_proc=32,
-                    remove_columns=ds.column_names,
                 )
-            else:
-                ds = ds.map(pipeline, num_proc=32, remove_columns=ds.column_names)
 
             datasets.append(ds)
 
         LOG.info("merging and shuffling master dataset")
-        dataset = concatenate_datasets(datasets).shuffle(seed=seed+1)
+        dataset = concatenate_datasets(datasets)
+        if not cfg.dont_shuffle:
+            dataset = dataset.shuffle(seed=seed+1)
 
         if cfg.local_rank == 0 and cfg.dataset_prepared_path:
             LOG.info(f"Saving merged prepared dataset to disk... {prepared_ds_path}")
@@ -347,7 +360,7 @@ def load_prepare_datasets(
                 tokenizer, cfg, default_dataset_prepared_path
             )
 
-            if cfg.seed:
+            if cfg.seed and not cfg.dont_shuffle:
                 dataset = dataset.shuffle(seed=cfg.seed)
 
             constant_len_dataset = ConstantLengthDataset(
@@ -398,7 +411,17 @@ def load_prepare_datasets(
             index=cfg.dataset_shard_idx,
         )
 
-    if cfg.val_set_size:
+    if cfg.val_split_name:
+        if not "_split_name" in dataset.column_names:
+            raise ValueError(
+                "Dataset does not have a _split_name column, cannot split"
+            )
+        
+        sn = cfg.val_split_name
+        dataset = dataset.flatten_indices()
+        train_dataset = dataset.filter(lambda e: e["_split_name"] == "train", num_proc=8)
+        eval_dataset = dataset.filter(lambda e: e["_split_name"] == sn, num_proc=8)
+    elif cfg.val_set_size:
         # ensure we end up with the same fingerprint by doing rank0 first and being able to cache
         to_hash_train = (
             dataset._fingerprint  # pylint: disable=protected-access

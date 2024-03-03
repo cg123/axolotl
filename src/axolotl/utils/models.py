@@ -1,4 +1,5 @@
 """Module for models and model loading"""
+
 import logging
 import math
 import os
@@ -295,9 +296,9 @@ def load_model(
             LOG.warning("model config does not contain quantization_config information")
         else:
             if cfg.gptq_disable_exllama is not None:
-                model_config.quantization_config[
-                    "disable_exllama"
-                ] = cfg.gptq_disable_exllama
+                model_config.quantization_config["disable_exllama"] = (
+                    cfg.gptq_disable_exllama
+                )
             model_kwargs["quantization_config"] = GPTQConfig(
                 **model_config.quantization_config
             )
@@ -502,19 +503,17 @@ def load_model(
     if hasattr(model, "device") and model.device.type == "cuda":
         log_gpu_memory_usage(LOG, "after model load", model.device)
 
-    if cfg.is_llama_derived_model and (cfg.rope_scale or cfg.rope_alpha):
-        from axolotl.monkeypatch.llama_rope import llama_scale_rope
+    if cfg.is_llama_derived_model and (cfg.rope_set_offset):
+        from axolotl.monkeypatch.llama_rope import llama_patch_rope_offset
 
-        scale = getattr(cfg, "rope_scale", 1.0)
-        alpha = getattr(cfg, "rope_alpha", 1.0)
-        logging.info(f"patching with scaled rope (scale = {scale}, alpha = {alpha})")
-        llama_scale_rope(
+        logging.info(
+            f"patching with offset rope (max_position_embeddings = {model.config.max_position_embeddings})"
+        )
+        llama_patch_rope_offset(
             model,
-            scale=scale,
-            alpha=alpha,
             max_position_embeddings=model.config.max_position_embeddings,
         )
-    
+
     # make sure these are fp32 per Ramesh et al. (2021)
     for name, module in model.named_modules():
         if "norm" in name:

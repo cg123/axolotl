@@ -28,6 +28,7 @@ from axolotl.utils.callbacks import (
     LossWatchDogCallback,
     SaveAxolotlConfigtoWandBCallback,
     SaveBetterTransformerModelCallback,
+    SetOffsetCallback,
     bench_eval_callback_factory,
     log_prediction_callback_factory,
 )
@@ -484,6 +485,11 @@ class HFCausalTrainerBuilder(TrainerBuilderBase):
                 self.cfg.early_stopping_patience,
             )
             callbacks.append(early_stop_cb)
+
+        if self.cfg.rope_set_offset:
+            max_seq_len = self.model.config.max_position_embeddings
+            LOG.warning("Adding SetOffsetCallback, sequence_len: %s, max_sequence_length: %s", self.cfg.sequence_len, max_seq_len)
+            callbacks.append(SetOffsetCallback(self.cfg.sequence_len, max_seq_len))
 
         return callbacks
 

@@ -76,12 +76,17 @@ def patch_qwen3moe_scattermoe():
             state_dict: dict,
             prefix: str,
             local_metadata: dict,
+            strict: bool,
             missing_keys: set,
             unexpected_keys: set,
             error_msgs: list,
         ) -> None:
+            LOG.warning(f"[{prefix}] Hook called. prefix: {prefix}, module: {module}")
             if not isinstance(module, ScattermoeGLUBlock):
                 return
+            LOG.info(f"[{prefix}] Hook started.")
+            LOG.info(f"[{prefix}] Initial missing_keys: {missing_keys}")
+            LOG.info(f"[{prefix}] Initial unexpected_keys: {unexpected_keys}")
 
             num_experts = module.config.num_experts
 
@@ -115,10 +120,18 @@ def patch_qwen3moe_scattermoe():
                     down_proj_weights.append(state_dict[hf_down_key])
                     keys_to_remove_from_state_dict.append(hf_down_key)
 
+            LOG.info(
+                f"[{prefix}] found_any_hf_expert_weights: {found_any_hf_expert_weights}"
+            )
             if not found_any_hf_expert_weights:
                 # No HF expert weights found, maybe it's already in scattermoe format or a different checkpoint
                 # If scattermoe keys are missing, load_state_dict will handle it.
                 return
+
+            LOG.info(f"[{prefix}] Num experts: {num_experts}")
+            LOG.info(f"[{prefix}] len(gate_proj_weights): {len(gate_proj_weights)}")
+            LOG.info(f"[{prefix}] len(up_proj_weights): {len(up_proj_weights)}")
+            LOG.info(f"[{prefix}] len(down_proj_weights): {len(down_proj_weights)}")
 
             if gate_proj_weights and len(gate_proj_weights) != num_experts:
                 error_msgs.append(
@@ -137,11 +150,12 @@ def patch_qwen3moe_scattermoe():
                 len(gate_proj_weights) == num_experts
                 and len(up_proj_weights) == num_experts
             ):
+                LOG.info(f"[{prefix}] Creating {scattermoe_w1_key}")
                 # Combine gate_proj and up_proj for scattermoe's first ParallelExperts layer
                 # Original Qwen3MoeMLP: gate_proj.weight (I_moe, H), up_proj.weight (I_moe, H)
                 # scattermoe GLUMLP expects: experts.weight (E, 2*I_moe, H)
                 combined_w1 = [
-                    torch.cat([g, u], dim=0)
+                    torch.cat([u, g], dim=0)
                     for g, u in zip(gate_proj_weights, up_proj_weights)
                 ]
                 state_dict[scattermoe_w1_key] = torch.stack(combined_w1, dim=0)
@@ -155,6 +169,7 @@ def patch_qwen3moe_scattermoe():
                     )
 
             if len(down_proj_weights) == num_experts:
+                LOG.info(f"[{prefix}] Creating {scattermoe_w2_key}")
                 # Stack down_proj weights for scattermoe's second ParallelExperts layer
                 # Original Qwen3MoeMLP: down_proj.weight (H, I_moe)
                 # scattermoe GLUMLP expects: output_experts.weight (E, H, I_moe)
@@ -171,6 +186,10 @@ def patch_qwen3moe_scattermoe():
                 del state_dict[key]
                 if key in unexpected_keys:
                     unexpected_keys.remove(key)
+
+            LOG.info(f"[{prefix}] Final missing_keys: {missing_keys}")
+            LOG.info(f"[{prefix}] Final unexpected_keys: {unexpected_keys}")
+            LOG.info(f"[{prefix}] Error messages: {error_msgs}")
 
         @staticmethod
         def _state_hook(
@@ -191,12 +210,21 @@ def patch_qwen3moe_scattermoe():
 
             if scattermoe_w1_key in state_dict:
                 w1_stacked = state_dict[scattermoe_w1_key]  # Shape: (E, 2*I_moe, H)
+                if len(w1_stacked.shape) == 1 and w1_stacked.shape[0] == 0:
+                    # hack for empty state dict
+                    w1_stacked = torch.zeros(
+                        num_experts,
+                        0,
+                        0,
+                        device=w1_stacked.device,
+                        dtype=w1_stacked.dtype,
+                    )
                 keys_to_remove_from_state_dict.append(scattermoe_w1_key)
 
                 # Unstack and split
                 for i in range(num_experts):
                     w1_expert_i = w1_stacked[i]  # Shape: (2*I_moe, H)
-                    w_gate_i, w_up_i = torch.chunk(
+                    w_up_i, w_gate_i = torch.chunk(
                         w1_expert_i, 2, dim=0
                     )  # Each (I_moe, H)
 
@@ -205,6 +233,15 @@ def patch_qwen3moe_scattermoe():
 
             if scattermoe_w2_key in state_dict:
                 w2_stacked = state_dict[scattermoe_w2_key]  # Shape: (E, H, I_moe)
+                if len(w2_stacked.shape) == 1 and w2_stacked.shape[0] == 0:
+                    # as above, hack for empty state dict
+                    w2_stacked = torch.zeros(
+                        num_experts,
+                        0,
+                        0,
+                        device=w2_stacked.device,
+                        dtype=w1_stacked.dtype,
+                    )
                 keys_to_remove_from_state_dict.append(scattermoe_w2_key)
 
                 # Unstack
@@ -218,7 +255,7 @@ def patch_qwen3moe_scattermoe():
     def _decoder_layer_init(
         self: Qwen3MoeDecoderLayer, config: Qwen3MoeConfig, layer_idx: int
     ):
-        super(Qwen3MoeDecoderLayer, self).__init__(config, layer_idx)
+        nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
         self.self_attn = Qwen3MoeAttention(config, layer_idx)
         if (layer_idx not in config.mlp_only_layers) and (

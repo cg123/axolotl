@@ -1156,6 +1156,7 @@ class ModelLoader:
         if is_deepspeed_zero3_enabled():
             skip_move_to_device = True
 
+        print(self.model)
         return skip_move_to_device
 
     def adjust_model_config(self) -> None:

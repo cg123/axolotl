@@ -598,12 +598,17 @@ class ModelLoader:
 
             patch_gemma3conditionalgeneration_forward()
 
-        if self.cfg.model_config_type == "qwen3_moe" and self.cfg.qwen3moe_scattermoe:
-            from axolotl.monkeypatch.qwen3moe_scattermoe import (
-                patch_scattermoe,
+        if self.cfg.qwen3moe_scattermoe:
+            if self.cfg.model_config_type != "qwen3_moe":
+                raise ValueError(
+                    "Qwen3MoeScatterMoe patch is only available for qwen3_moe model."
+                )
+
+            from axolotl.monkeypatch.qwen3moe_scattermoe_class import (
+                patch_qwen3moe_scattermoe,
             )
 
-            patch_scattermoe()
+            patch_qwen3moe_scattermoe()
 
         # load any patches from plugins
 

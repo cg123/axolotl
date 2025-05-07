@@ -1,11 +1,7 @@
-import types
-
 import torch
 import torch.nn.functional as F
 from accelerate.logging import get_logger
 from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
-from transformers.activations import ACT2FN
-
 
 LOG = get_logger("axolotl.monkeypatch.qwen3moe_scattermoe")
 
@@ -78,7 +74,7 @@ def patch_scattermoe(use_torch_compile: bool = True):
 
         # apply activation function
         gated_values, up_values = hidden_act_and_up_grouped.chunk(2, dim=-1)
-        intermediate_grouped = self.experts[0].act_fn(gated_values) * up_values
+        intermediate_grouped = F.silu(gated_values) * up_values
         # intermediate_grouped: (num_tokens * top_k, moe_intermediate_size)
 
         # output projection
@@ -114,6 +110,8 @@ def patch_scattermoe(use_torch_compile: bool = True):
             _scattermoe_forward = torch.compile(
                 _scattermoe_forward,
                 mode="reduce-overhead",
+                dynamic=True,
+                fullgraph=True,
             )
             LOG.info("Successfully compiled _scattermoe_forward.")
         except Exception as e:

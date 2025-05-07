@@ -218,7 +218,7 @@ def patch_qwen3moe_scattermoe():
     def _decoder_layer_init(
         self: Qwen3MoeDecoderLayer, config: Qwen3MoeConfig, layer_idx: int
     ):
-        super().__init__()
+        super(Qwen3MoeDecoderLayer, self).__init__(config, layer_idx)
         self.hidden_size = config.hidden_size
         self.self_attn = Qwen3MoeAttention(config, layer_idx)
         if (layer_idx not in config.mlp_only_layers) and (

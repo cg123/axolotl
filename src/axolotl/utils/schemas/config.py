@@ -249,6 +249,8 @@ class AxolotlInputConfig(
 
     llama4_linearized_experts: bool | None = None
 
+    qwen3moe_scattermoe: bool | None = None
+
     deepspeed: str | dict[str, Any] | None = None
     fsdp: list[str] | None = None
     fsdp_config: dict[str, Any] | None = None

@@ -454,7 +454,7 @@ def process_datasets_for_packing(cfg, train_dataset, eval_dataset):
     if cfg.use_pose:
         pose_kwargs = {}
         if cfg.pose_num_chunks is not None:
-            pose_kwargs["chunks"] = cfg.pose_num_chunks
+            pose_kwargs["num_chunks"] = cfg.pose_num_chunks
         if cfg.pose_probability is not None:
             pose_kwargs["pose_probability"] = cfg.pose_probability
         pose_fn = partial(

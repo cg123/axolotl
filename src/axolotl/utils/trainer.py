@@ -6,7 +6,7 @@ import os
 import random
 from contextlib import contextmanager
 from functools import partial
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -135,77 +135,198 @@ def add_position_ids(sample):
     return sample
 
 
+def _determine_chunk_boundaries(
+    sample_len: int,
+    input_ids_list: List[int],
+    num_chunks_target: int,
+    min_chunk_len: int,
+    split_on_token_ids: Optional[List[int]],
+) -> List[int]:
+    """
+    Calculates the end indices of chunks.
+    Returns a sorted list of unique chunk end indices (exclusive).
+    Fewer chunks than num_chunks_target may be formed if constraints aren't met.
+    """
+    if sample_len == 0:
+        return []
+
+    # Identify preferred split locations (index *after* the special token)
+    preferred_splits_set: Set[int] = set()
+    if split_on_token_ids:
+        for i, token_id in enumerate(input_ids_list):
+            # A split occurs *after* the token. i+1 is the end of the current chunk.
+            # It must be < sample_len to be an internal split point.
+            if token_id in split_on_token_ids and (i + 1) < sample_len:
+                preferred_splits_set.add(i + 1)
+    
+    # Sort preferred splits for consistent selection if multiple are eligible in a range
+    sorted_preferred_splits = sorted(list(preferred_splits_set))
+
+    # If only one chunk is target, or sample is too short for even one min_chunk_len,
+    # the whole sample becomes a single chunk.
+    # The loop below will also handle cases where num_chunks_target > 1 but sample is too short.
+    if num_chunks_target == 1 or sample_len < min_chunk_len :
+        return [sample_len]
+
+    # --- Multi-chunk logic ---
+    # internal_split_points stores the end indices of the first (N-1) chunks.
+    internal_split_points: List[int] = []
+    current_pos_in_sample = 0  # Start of the segment from which the current chunk is being formed.
+
+    # Attempt to define (num_chunks_target - 1) split points for num_chunks_target chunks
+    for _ in range(num_chunks_target - 1):
+        # Number of chunks that still need to be formed from current_pos_in_sample onwards
+        # This includes the one for which we are defining an end, plus subsequent ones.
+        num_chunks_to_form_from_here = num_chunks_target - len(internal_split_points)
+
+        # Min length required from current_pos_in_sample for all remaining chunks
+        min_len_needed_for_all_remaining = min_chunk_len * num_chunks_to_form_from_here
+        
+        if (sample_len - current_pos_in_sample) < min_len_needed_for_all_remaining:
+            break  # Not enough total length left
+
+        # Determine valid range for the *end position* of the *current* chunk
+        # Min end: current chunk takes at least min_chunk_len
+        min_end_for_this_chunk = current_pos_in_sample + min_chunk_len
+        # Max end: leave enough space for subsequent (num_chunks_to_form_from_here - 1) chunks
+        # to each have min_chunk_len
+        max_end_for_this_chunk = sample_len - (min_chunk_len * (num_chunks_to_form_from_here - 1))
+        
+        if min_end_for_this_chunk > max_end_for_this_chunk: # Should be caught by above check, but as safeguard
+            break 
+        
+        # Find preferred split locations within the valid range for this chunk's end
+        eligible_preferred = [
+            p for p in sorted_preferred_splits
+            if min_end_for_this_chunk <= p <= max_end_for_this_chunk and \
+               p > current_pos_in_sample # Must advance position
+        ]
+        
+        chosen_split_point = -1
+        if eligible_preferred:
+            chosen_split_point = random.choice(eligible_preferred)
+        else:
+            # If no (eligible) preferred splits, pick randomly.
+            # random.randint requires start <= end, ensured by min_end <= max_end check above.
+            chosen_split_point = random.randint(min_end_for_this_chunk, max_end_for_this_chunk)
+        
+        if chosen_split_point <= current_pos_in_sample: # Fallback if split doesn't advance
+            break
+
+        internal_split_points.append(chosen_split_point)
+        current_pos_in_sample = chosen_split_point
+
+        if current_pos_in_sample >= sample_len: # Reached end of sample
+            break
+    
+    # --- Finalize chunk boundaries ---
+    # `internal_split_points` contains s1, s2, ... The full list of chunk end points
+    # should effectively partition the sample, ending with sample_len.
+    final_chunk_ends = list(internal_split_points) # Make a copy
+
+    # Ensure sample_len is the ultimate boundary if there's content.
+    if sample_len > 0:
+        if not final_chunk_ends or final_chunk_ends[-1] < sample_len:
+            final_chunk_ends.append(sample_len)
+    
+    # Clean up: ensure uniqueness and sort. Filter out invalid values (e.g., 0 or > sample_len).
+    if not final_chunk_ends:
+        return []
+
+    unique_indices = set()
+    for idx in final_chunk_ends:
+        if 0 < idx <= sample_len: # Ensure valid indices
+            unique_indices.add(idx)
+    
+    return sorted(list(unique_indices))
+
+
 def add_pose_position_ids(
-    sample,
-    max_context_len=32768,
+    sample: dict,
+    max_context_len: int = 32768,
     split_on_token_ids: Optional[List[int]] = None,
-    chunks: int = 2,
+    num_chunks: int = 2,
+    min_chunk_len: int = 10,
     pose_probability: float = 1.0,
 ):
     """
-    use the PoSE technique to extend the context length by randomly skipping
-    positions in the context. We only want to skip right before tokens in
-    the split_on_token_ids list. We should attempt to randomly distribute
-    the skips, but we don't need the final position_ids to be the full
-    context_len. There may be multiple turns in the context, so we want to
-    make sure we take into account the maximum possible number of skips
-    remaining in each sample.
+    Applies Positional Skip-wisE (PoSE) to extend context length by manipulating position_ids.
+    Unifies random chunking with token-ID-guided splitting.
+    'split_on_token_ids' provides preferred split locations if available within constraints.
+    'num_chunks' is the target; fewer may be created if sample_len is too short.
     """
+    input_ids_val = sample["input_ids"]
+    input_ids_list = input_ids_val.tolist() if isinstance(input_ids_val, torch.Tensor) else input_ids_val
+    
+    sample_len = len(input_ids_list)
 
-    input_ids = sample["input_ids"]
-    sample_len = len(input_ids)
-
-    if random.random() > pose_probability:
-        sample["position_ids"] = torch.arange(sample_len)
+    if random.random() > pose_probability or sample_len == 0:
+        sample["position_ids"] = torch.arange(sample_len, dtype=torch.long)
         sample["length"] = sample_len
+        sample["sequence_len"] = sample_len
         return sample
 
-    max_skips = max_context_len - sample_len
+    if num_chunks <= 0: # Target at least one chunk (the whole sequence)
+        raise ValueError("Number of chunks (num_chunks) must be at least 1.")
+    if min_chunk_len <= 0:
+        raise ValueError("Minimum chunk length (min_chunk_len) must be positive.")
 
-    if split_on_token_ids is None:
-        split_on_token_ids = []
+    # --- 1. Determine Chunk Boundaries ---
+    # These are end indices (exclusive) of chunks in the original input.
+    chunk_end_indices = _determine_chunk_boundaries(
+        sample_len, input_ids_list, num_chunks, min_chunk_len, split_on_token_ids
+    )
 
-    if split_on_token_ids:
-        split_indices = [
-            i for i, token_id in enumerate(input_ids) if token_id in split_on_token_ids
-        ]
-    else:
-        chunk_len = sample_len // chunks
-        split_indices = [i * chunk_len for i in range(1, chunks)]
-    split_indices.append(len(input_ids))  # make sure we go to the end of the sample
-    if split_indices[0] < 2:
-        # drop the first split index if it's too close to the beginning
-        split_indices = split_indices[1:]
+    if not chunk_end_indices: # No valid chunking possible (e.g. sample_len became 0 effectively) or sample_len was 0
+        sample["position_ids"] = torch.arange(sample_len, dtype=torch.long) # Fallback to standard
+        sample["length"] = sample_len
+        sample["sequence_len"] = sample_len
+        return sample
 
-    position_ids = []
-    prev_index = 0
-    total_skips = 0
+    # --- 2. Generate PoSE Position IDs based on Chunks ---
+    final_pose_positions = []
+    # Create (start, end) pairs for chunks. Start is 0 for the first chunk.
+    # chunk_end_indices = [end1, end2, ..., sample_len]
+    # boundaries_for_iter = [0, end1, end2, ..., sample_len]
+    current_chunk_start_idx = 0
+    
+    max_skips_budget = max(0, max_context_len - sample_len)
+    cumulative_skip = 0
 
-    for split_index in split_indices:
-        num_skips = (
-            random.randint(0, max_skips)  # nosec B311
-            if prev_index != 0 and max_skips
-            else 0
+    for i, current_chunk_end_idx in enumerate(chunk_end_indices):
+        if current_chunk_start_idx >= current_chunk_end_idx: # Skip empty or invalid chunk segments
+            current_chunk_start_idx = current_chunk_end_idx # Ensure progress for next iteration
+            continue
+
+        # Add skips
+        if i > 0:
+            skip_increment = 0
+            if max_skips_budget > 0:
+                skip_increment = random.randint(0, max_skips_budget) 
+                max_skips_budget -= skip_increment
+            cumulative_skip += skip_increment
+        
+        for original_pos in range(current_chunk_start_idx, current_chunk_end_idx):
+            final_pose_positions.append(original_pos + cumulative_skip)
+        
+        current_chunk_start_idx = current_chunk_end_idx
+
+    sample["position_ids"] = torch.tensor(final_pose_positions, dtype=torch.long)
+    sample["length"] = len(final_pose_positions)
+
+    if final_pose_positions:
+        sample["sequence_len"] = final_pose_positions[-1] + 1
+    else: # Should not happen if sample_len > 0 and chunk_end_indices is not empty
+        sample["sequence_len"] = 0
+
+    if len(final_pose_positions) != sample_len:
+        raise AssertionError(
+            f"PoSE Position IDs length {len(final_pose_positions)} "
+            f"does not match input_ids length {sample_len}. "
+            f"Generated chunk_ends: {chunk_end_indices}, "
+            f"Final PoSE positions (first 10): {final_pose_positions[:10]}"
         )
-        max_skips -= num_skips
-        total_skips += num_skips
-
-        segment_position_ids = list(
-            range(prev_index + total_skips, split_index + total_skips)
-        )
-
-        position_ids.extend(segment_position_ids)
-        prev_index = split_index
-
-    sample["sequence_len"] = position_ids[-1]
-    position_ids = torch.tensor(position_ids)
-
-    sample["position_ids"] = position_ids
-    sample["length"] = len(position_ids)
-    assert len(position_ids) == len(input_ids)
-
     return sample
-
 
 def add_length(sample):
     sample["length"] = len(sample["input_ids"])

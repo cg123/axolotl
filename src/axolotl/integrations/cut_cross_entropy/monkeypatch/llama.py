@@ -3,6 +3,7 @@
 # pylint: disable=duplicate-code
 
 
+import logging
 from types import MethodType
 from typing import Optional, Union
 
@@ -26,6 +27,9 @@ from transformers.utils.deprecation import deprecate_kwarg
 from transformers.utils.generic import can_return_tuple
 
 _PATCH_OPTS: PatchOptions | None = None
+
+
+LOG = logging.getLogger("axolotl.integrations.cut_cross_entropy")
 
 
 @can_return_tuple
@@ -154,9 +158,14 @@ def patch_llama(
     _PATCH_OPTS = patch_options
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(
-            maybe_model, modeling_llama.LlamaForCausalLM
-        ), f"Expected a LlamaForCausalLM model. Got {type(maybe_model)}."
+        # assert isinstance(
+        #     maybe_model, modeling_llama.LlamaForCausalLM
+        # ), f"Expected a LlamaForCausalLM model. Got {type(maybe_model)}."
+        if not isinstance(maybe_model, modeling_llama.LlamaForCausalLM):
+            LOG.warning(
+                "Patching a model that is not LlamaForCausalLM. "
+                f"Actual type: {type(maybe_model)}. Good luck!"
+            )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 

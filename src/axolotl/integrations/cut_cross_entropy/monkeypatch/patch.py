@@ -52,6 +52,7 @@ from axolotl.integrations.cut_cross_entropy.monkeypatch.qwen3_moe import (
 )
 
 CUT_CROSS_ENTROPY_MODEL_MAPPING = {
+    "arcee": patch_llama,  # close enough
     "llama": patch_llama,
     "llama4": patch_llama4,
     "llama4_text": patch_llama4_text,

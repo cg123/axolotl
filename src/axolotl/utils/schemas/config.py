@@ -213,6 +213,7 @@ class AxolotlInputConfig(
     pose_split_on_token_ids: list[int] | None = None
     pose_max_context_len: int | None = None
     pose_num_chunks: int | None = None
+    pose_probability: float | None = None
 
     pretrain_multipack_buffer_size: int | None = 10_000
     pretrain_multipack_attn: bool | None = Field(

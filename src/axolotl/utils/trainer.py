@@ -140,6 +140,7 @@ def add_pose_position_ids(
     max_context_len=32768,
     split_on_token_ids: Optional[List[int]] = None,
     chunks: int = 2,
+    pose_probability: float = 1.0,
 ):
     """
     use the PoSE technique to extend the context length by randomly skipping
@@ -153,6 +154,12 @@ def add_pose_position_ids(
 
     input_ids = sample["input_ids"]
     sample_len = len(input_ids)
+
+    if random.random() > pose_probability:
+        sample["position_ids"] = torch.arange(sample_len)
+        sample["length"] = sample_len
+        return sample
+
     max_skips = max_context_len - sample_len
 
     if split_on_token_ids is None:
@@ -327,6 +334,8 @@ def process_datasets_for_packing(cfg, train_dataset, eval_dataset):
         pose_kwargs = {}
         if cfg.pose_num_chunks is not None:
             pose_kwargs["chunks"] = cfg.pose_num_chunks
+        if cfg.pose_probability is not None:
+            pose_kwargs["pose_probability"] = cfg.pose_probability
         pose_fn = partial(
             add_pose_position_ids,
             max_context_len=cfg.pose_max_context_len,

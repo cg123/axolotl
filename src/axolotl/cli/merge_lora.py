@@ -1,20 +1,18 @@
 """CLI to merge a trained LoRA into a base model."""
 
-import logging
 from pathlib import Path
 from typing import Union
 
 import fire
-import transformers
 from dotenv import load_dotenv
 
-from axolotl.cli.args import TrainerCliArgs
 from axolotl.cli.art import print_axolotl_text_art
 from axolotl.cli.config import load_cfg
 from axolotl.cli.utils import load_model_and_tokenizer
 from axolotl.utils.dict import DictDefault
+from axolotl.utils.logging import get_logger
 
-LOG = logging.getLogger(__name__)
+LOG = get_logger(__name__)
 
 
 def do_merge_lora(*, cfg: DictDefault) -> None:
@@ -68,12 +66,6 @@ def do_cli(config: Union[Path, str] = Path("examples/"), **kwargs) -> None:
     Raises:
         ValueError: If target directory for LoRA merged model does not exist.
     """
-    # pylint: disable=duplicate-code
-    parser = transformers.HfArgumentParser(TrainerCliArgs)
-    parsed_cli_args, _ = parser.parse_args_into_dataclasses(
-        return_remaining_strings=True
-    )
-    parsed_cli_args.merge_lora = True
 
     parsed_cfg = load_cfg(
         config,

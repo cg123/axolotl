@@ -1,7 +1,6 @@
 """data handling specific to DPO"""
 
 import inspect
-import logging
 from functools import partial
 from pathlib import Path
 from typing import Any, List, Union
@@ -18,9 +17,10 @@ from axolotl.utils.data.shared import datasets_w_name_generator, load_dataset_w_
 from axolotl.utils.data.utils import deduplicate_and_log_datasets, md5
 from axolotl.utils.dict import DictDefault
 from axolotl.utils.distributed import is_main_process, zero_first
+from axolotl.utils.logging import get_logger
 from axolotl.utils.schemas.enums import RLType
 
-LOG = logging.getLogger(__name__)
+LOG = get_logger(__name__)
 
 
 def _get_path(ds_hash, cfg):
@@ -71,8 +71,9 @@ def map_dataset(cfg, data_set, ds_transform_fn, tokenizer, **map_kwargs):
 
     data_set = data_set.map(
         ds_transform_fn,
-        desc="Mapping RL Dataset",
         num_proc=cfg.dataset_processes,
+        load_from_cache_file=not cfg.is_preprocess,
+        desc="Mapping RL Dataset",
         **map_kwargs,
     )
 
@@ -217,7 +218,7 @@ def load_prepare_preference_datasets(cfg):
                     + "|"
                     + "train"
                     + "|"
-                    + str(seed)
+                    + str(cfg.seed or 42)
                 )
                 to_hash_test = (
                     train_dataset._fingerprint  # pylint: disable=protected-access
@@ -226,7 +227,7 @@ def load_prepare_preference_datasets(cfg):
                     + "|"
                     + "test"
                     + "|"
-                    + str(seed)
+                    + str(cfg.seed or 42)
                 )
                 train_fingerprint = md5(to_hash_train)
                 test_fingerprint = md5(to_hash_test)

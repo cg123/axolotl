@@ -6,7 +6,7 @@ import os
 import random
 from contextlib import contextmanager
 from functools import partial
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Set, Union
 
 import numpy as np
 import torch
